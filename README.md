@@ -2,6 +2,8 @@
 
 **How much can a model fold into 8,000 tokens?**
 
+▶ **Live results, every scene clickable: https://zorahrel.github.io/origami-bench/**
+
 A tiny, reproducible benchmark that gives every model the same short prompt, asks for **one self-contained HTML file** (three.js scene, physics sandbox, raymarching shader…) under a hard **8,000-token output budget**, then *actually runs it*: headless WebKit, 7-second video, automatic health checks, and a video-judge score.
 
 No humans voting, no leaderboard to overfit to: four prompts you can read in a minute (`tasks/tasks.json`) and swap for your own.
