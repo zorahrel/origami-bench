@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Walking Humanoid</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#0b0d14}
+canvas{display:block}
+</style>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const fogColor = 0x0b0d14;
+scene.background = new THREE.Color(fogColor);
+scene.fog = new THREE.Fog(fogColor, 8, 26);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 100);
+
+// Lights
+scene.add(new THREE.HemisphereLight(0x8899bb, 0x222233, 0.5));
+const sun = new THREE.DirectionalLight(0xffffff, 2.0);
+sun.position.set(4,8,5);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.radius = 5;
+sun.shadow.bias = -0.0005;
+const sc = sun.shadow.camera;
+sc.left=-5; sc.right=5; sc.top=5; sc.bottom=-5; sc.near=1; sc.far=25;
+scene.add(sun);
+
+const pt = new THREE.PointLight(0xff3da0, 25, 12, 1.6);
+pt.castShadow = false;
+scene.add(pt);
+
+// Checkered floor via canvas texture
+const cv = document.createElement('canvas');
+cv.width = cv.height = 512;
+const g = cv.getContext('2d');
+const n = 8, s = 512/n;
+for(let i=0;i<n;i++) for(let j=0;j<n;j++){
+  g.fillStyle = (i+j)%2 ? '#e8e8ee' : '#2a2d3a';
+  g.fillRect(i*s,j*s,s,s);
+}
+const tex = new THREE.CanvasTexture(cv);
+tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+tex.repeat.set(10,10);
+tex.colorSpace = THREE.SRGBColorSpace;
+tex.anisotropy = 8;
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(40,40),
+  new THREE.MeshStandardMaterial({map:tex, roughness:0.85}));
+floor.rotation.x = -Math.PI/2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// Materials
+const skin = new THREE.MeshStandardMaterial({color:0xf0c09a, roughness:0.7});
+const shirt = new THREE.MeshStandardMaterial({color:0x3b82f6, roughness:0.6});
+const pants = new THREE.MeshStandardMaterial({color:0x2b2f4a, roughness:0.7});
+const shoe = new THREE.MeshStandardMaterial({color:0xf5f5f5, roughness:0.5});
+
+function mesh(geo, mat, x=0, y=0, z=0){
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x,y,z);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+function joint(parent, x, y, z){
+  const j = new THREE.Group();
+  j.position.set(x,y,z);
+  parent.add(j);
+  return j;
+}
+
+// Dimensions
+const THIGH=0.45, SHIN=0.45, FOOT_H=0.08;
+const UARM=0.32, FARM=0.30;
+const HIP_Y = THIGH + SHIN + FOOT_H + 0.04;
+
+// Hierarchy
+const root = new THREE.Group();
+scene.add(root);
+const pelvis = joint(root, 0, HIP_Y, 0);
+pelvis.add(mesh(new THREE.BoxGeometry(0.4,0.2,0.24), pants, 0, 0.04, 0));
+
+const torso = joint(pelvis, 0, 0.12, 0);
+torso.add(mesh(new THREE.BoxGeometry(0.44,0.55,0.24), shirt, 0, 0.28, 0));
+
+const neck = joint(torso, 0, 0.58, 0);
+neck.add(mesh(new THREE.CylinderGeometry(0.05,0.06,0.1,12), skin, 0, 0.03, 0));
+const head = joint(neck, 0, 0.1, 0);
+head.add(mesh(new THREE.SphereGeometry(0.13,24,18), skin, 0, 0.12, 0));
+head.add(mesh(new THREE.SphereGeometry(0.02,8,8), new THREE.MeshStandardMaterial({color:0x111111}), -0.05, 0.14, 0.12));
+head.add(mesh(new THREE.SphereGeometry(0.02,8,8), new THREE.MeshStandardMaterial({color:0x111111}), 0.05, 0.14, 0.12));
+head.add(mesh(new THREE.SphereGeometry(0.135,24,12,0,Math.PI*2,0,Math.PI*0.45), new THREE.MeshStandardMaterial({color:0x3a2416}), 0, 0.125, -0.01));
+
+function makeArm(side){
+  const sh = joint(torso, side*0.28, 0.5, 0);
+  sh.add(mesh(new THREE.SphereGeometry(0.07,12,10), shirt));
+  sh.add(mesh(new THREE.CylinderGeometry(0.05,0.045,UARM,12), shirt, 0, -UARM/2, 0));
+  const el = joint(sh, 0, -UARM, 0);
+  el.add(mesh(new THREE.SphereGeometry(0.045,10,8), skin));
+  el.add(mesh(new THREE.CylinderGeometry(0.042,0.035,FARM,12), skin, 0, -FARM/2, 0));
+  const wr = joint(el, 0, -FARM, 0);
+  wr.add(mesh(new THREE.BoxGeometry(0.07,0.12,0.04), skin, 0, -0.06, 0));
+  return {sh, el, wr};
+}
+function makeLeg(side){
+  const hp = joint(pelvis, side*0.11, -0.02, 0);
+  hp.add(mesh(new THREE.CylinderGeometry(0.075,0.062,THIGH,12), pants, 0, -THIGH/2, 0));
+  const kn = joint(hp, 0, -THIGH, 0);
+  kn.add(mesh(new THREE.SphereGeometry(0.062,10,8), pants));
+  kn.add(mesh(new THREE.CylinderGeometry(0.058,0.045,SHIN,12), pants, 0, -SHIN/2, 0));
+  const an = joint(kn, 0, -SHIN, 0);
+  an.add(mesh(new THREE.BoxGeometry(0.11,FOOT_H,0.26), shoe, 0, -0.02, 0.06));
+  return {hp, kn, an};
+}
+const armL = makeArm(-1), armR = makeArm(1);
+const legL = makeLeg(-1), legR = makeLeg(1);
+
+// Animation
+const clock = new THREE.Clock();
+const SPEED = 2.6; // rad/s of gait phase
+function animate(){
+  const t = clock.getElapsedTime();
+  const ph = t*SPEED;
+
+  function leg(l, p){
+    const s = Math.sin(p);
+    l.hp.rotation.x = s*0.6;
+    // knee bends mostly while the leg swings forward
+    l.kn.rotation.x = Math.max(0, Math.sin(p - 1.2))*1.1 + 0.05;
+    l.an.rotation.x = -l.hp.rotation.x*0.3 - l.kn.rotation.x*0.25 + Math.max(0,-s)*0.2;
+  }
+  function arm(a, p){
+    const s = Math.sin(p);
+    a.sh.rotation.x = s*0.5;
+    a.el.rotation.x = -0.25 - Math.max(0, s)*0.7;
+    a.sh.rotation.z = (a === armL ? 1 : -1)*0.05;
+  }
+  leg(legL, ph);
+  leg(legR, ph+Math.PI);
+  // arms oppose the legs on the same side
+  arm(armL, ph+Math.PI);
+  arm(armR, ph);
+
+  // body bob: lowest at double support (twice per cycle)
+  pelvis.position.y = HIP_Y - 0.03 + Math.abs(Math.cos(ph))*0.04 - 0.0;
+  pelvis.position.x = Math.sin(ph)*0.015;
+  pelvis.rotation.y = Math.sin(ph)*0.12;
+  torso.rotation.y = -Math.sin(ph)*0.2;
+  torso.rotation.z = Math.sin(ph)*0.03;
+  torso.rotation.x = 0.06;
+  head.rotation.y = Math.sin(ph)*0.08;
+
+  // floor scrolls backwards to sell walking in place
+  tex.offset.y = (t*SPEED*0.5*0.0 + t*0.0);
+  floor.material.map.offset.y = -(ph/(Math.PI*2))*0.0;
+
+  // camera orbit
+  const a = t*0.25;
+  const r = 4.2;
+  camera.position.set(Math.sin(a)*r, 1.6 + Math.sin(t*0.3)*0.35, Math.cos(a)*r);
+  camera.lookAt(0, 0.95, 0);
+
+  // coloured light circling
+  pt.position.set(Math.cos(t*0.8)*1.8, 1.4 + Math.sin(t*1.3)*0.4, Math.sin(t*0.8)*1.8);
+  sun.target.position.set(0,0.8,0);
+  sun.target.updateMatrixWorld();
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+animate();
+
+addEventListener('resize',()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>

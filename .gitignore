@@ -1,0 +1,8 @@
+models.local.conf
+runs/*/*/*/raw.txt
+runs/*/*/*/video.webm
+runs/*/*/*/shot*.png
+runs/*/*/*/_v/
+runs/*/*/*/_judge_prompt.txt
+__pycache__/
+.DS_Store

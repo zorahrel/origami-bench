@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Physics Sandbox</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #050505;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <script type="module">
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+        // --- SCENE, CAMERA, RENDERER ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0a0c);
+        scene.fog = new THREE.FogExp2(0x0a0a0c, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        document.body.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 2.5);
+        dirLight.position.set(10, 25, 15);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 50;
+        const d = 12;
+        dirLight.shadow.camera.left = -d;
+        dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d;
+        dirLight.shadow.camera.bottom = -d;
+        dirLight.shadow.bias = -0.0005;
+        scene.add(dirLight);
+
+        const pointLight = new THREE.PointLight(0x3366ff, 3, 20);
+        pointLight.position.set(-8, 5, -8);
+        scene.add(pointLight);
+
+        const pointLight2 = new THREE.PointLight(0xff3366, 2, 20);
+        pointLight2.position.set(8, 5, 8);
+        scene.add(pointLight2);
+
+        // --- GLASS BOX SETUP ---
+        const boxWidth = 8;
+        const boxHeight = 12;
+        const boxDepth = 8;
+        const wallThickness = 0.4;
+
+        const boxGroup = new THREE.Group();
+        scene.add(boxGroup);
+
+        const glassMaterial = new THREE.MeshPhysicalMaterial({
+            color: 0xffffff,
+            metalness: 0.1,
+            roughness: 0.1,
+            transmission: 0.9,
+            thickness: 1.2,
+            transparent: true,
+            opacity: 0.4,
+            side: THREE.DoubleSide,
+            depthWrite: false
+        });
+
+        const floorGeo = new THREE.BoxGeometry(boxWidth + wallThickness*2, wallThickness, boxDepth + wallThickness*2);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x151518, roughness: 0.4, metalness: 0.2 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.position.y = -wallThickness / 2;
+        floor.receiveShadow = true;
+        boxGroup.add(floor);
+
+        const wallGeoX = new THREE.BoxGeometry(wallThickness, boxHeight, boxDepth);
+        const wallGeoZ = new THREE.BoxGeometry(boxWidth, boxHeight, wallThickness);
+
+        const wall1 = new THREE.Mesh(wallGeoX, glassMaterial); // Left
+        wall1.position.set(-(boxWidth/2 + wallThickness/2), boxHeight/2, 0);
+        wall1.castShadow = true; wall1.receiveShadow = true;
+        boxGroup.add(wall1);
+
+        const wall2 = new THREE.Mesh(wallGeoX, glassMaterial); // Right
+        wall2.position.set(boxWidth/2 + wallThickness/2, boxHeight/2, 0);
+        wall2.castShadow = true; wall2.receiveShadow = true;
+        boxGroup.add(wall2);
+
+        const wall3 = new THREE.Mesh(wallGeoZ, glassMaterial); // Back
+        wall3.position.set(0, boxHeight/2, -(boxDepth/2 + wallThickness/2));
+        wall3.castShadow = true; wall3.receiveShadow = true;
+        boxGroup.add(wall3);
+
+        const wall4 = new THREE.Mesh(wallGeoZ, glassMaterial); // Front
+        wall4.position.set(0, boxHeight/2, boxDepth/2 + wallThickness/2);
+        wall4.castShadow = true; wall4.receiveShadow = true;
+        boxGroup.add(wall4);
+
+        // --- PHYSICS & SPHERES SETUP ---
+        const COUNT = 180;
+        const sphereGeo = new THREE.SphereGeometry(1, 32, 32);
+        const sphereMat = new THREE.MeshPhysicalMaterial({
+            roughness: 0.15,
+            metalness: 0.1,
+            clearcoat: 1.0,
+            clearcoatRoughness: 0.1,
+        });
+
+        const instancedMesh = new THREE.InstancedMesh(sphereGeo, sphereMat, COUNT);
+        instancedMesh.castShadow = true;
+        instancedMesh.receiveShadow = true;
+        scene.add(instancedMesh);
+
+        // Physics arrays
+        const positions = [];
+        const velocities = [];
+        const radii = [];
+        const masses = [];
+        const colors = [];
+
+        const colorPool = [
+            new THREE.Color(0xff3344),
+            new THREE.Color(0x33ff66),
+            new THREE.Color(0x3388ff),
+            new THREE.Color(0xffaa00),
+            new THREE.Color(0xcc33ff),
+            new THREE.Color(0x00ffff),
+            new THREE.Color(0xffffff)
+        ];
+
+        const dummy = new THREE.Object3D();
+
+        for (let i = 0; i < COUNT; i++) {
+            radii.push(0.3 + Math.random() * 0.4); // radius 0.3 to 0.7
+            masses.push(Math.pow(radii[i], 3)); // mass proportional to volume
+            
+            positions.push(new THREE.Vector3(
+                (Math.random() - 0.5) * (boxWidth - 2),
+                boxHeight + i * 0.2 + Math.random() * 2, // stagger initial drop
+                (Math.random() - 0.5) * (boxDepth - 2)
+            ));
+            
+            velocities.push(new THREE.Vector3(
+                (Math.random() - 0.5) * 2,
+                (Math.random() - 0.5) * 2,
+                (Math.random() - 0.5) * 2
+            ));
+
+            const col = colorPool[Math.floor(Math.random() * colorPool.length)];
+            colors.push(col);
+            instancedMesh.setColorAt(i, col);
+        }
+        instancedMesh.instanceColor.needsUpdate = true;
+
+        // --- SIMULATION PARAMETERS ---
+        const gravity = -22.0;
+        const restitution = 0.65;
+        const friction = 0.98;
+        const subSteps = 5; // Higher substeps for stability
+
+        let shakeTimer = 0;
+        let shakeIntensity = 0;
+        const shakeInterval = 7.0; // Shake every 7 seconds
+
+        // --- ANIMATION LOOP ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            let dt = clock.getDelta();
+            if (dt > 0.1) dt = 0.1; // Cap delta time
+            const subDt = dt / subSteps;
+
+            // Handle periodic shake trigger
+            shakeTimer += dt;
+            if (shakeTimer > shakeInterval) {
+                shakeTimer = 0;
+                shakeIntensity = 1.2;
+            }
+            if (shakeIntensity > 0) {
+                shakeIntensity -= dt * 1.5;
+                if (shakeIntensity < 0) shakeIntensity = 0;
+            }
+
+            // Apply shake to box visuals
+            boxGroup.rotation.x = Math.sin(clock.getElapsedTime() * 25) * 0.03 * shakeIntensity;
+            boxGroup.rotation.z = Math.cos(clock.getElapsedTime() * 22) * 0.03 * shakeIntensity;
+
+            // Physics Sub-stepping
+            for (let step = 0; step < subSteps; step++) {
+                
+                // 1. Update velocities (Gravity & Shake forces)
+                for (let i = 0; i < COUNT; i++) {
+                    velocities[i].y += gravity * subDt;
+                    
+                    // Add impulse during shake
+                    if (shakeIntensity > 0) {
+                        velocities[i].x += (Math.random() - 0.5) * 15 * shakeIntensity * subDt;
+                        velocities[i].z += (Math.random() - 0.5) * 15 * shakeIntensity * subDt;
+                        velocities[i].y += Math.random() * 10 * shakeIntensity * subDt;
+                    }
+
+                    // Apply friction/drag
+                    velocities[i].multiplyScalar(Math.pow(friction, subDt));
+                }
+
+                // 2. Update positions
+                for (let i = 0; i < COUNT; i++) {
+                    positions[i].addScaledVector(velocities[i], subDt);
+                }
+
+                // 3. Sphere-vs-Sphere Collisions
+                for (let i = 0; i < COUNT; i++) {
+                    for (let j = i + 1; j < COUNT; j++) {
+                        const p1 = positions[i];
+                        const p2 = positions[j];
+                        const r1 = radii[i];
+                        const r2 = radii[j];
+
+                        const minDist = r1 + r2;
+                        const normal = new THREE.Vector3().subVectors(p2, p1);
+                        const distSq = normal.lengthSq();
+
+                        if (distSq < minDist * minDist && distSq > 0.00001) {
+                            const dist = Math.sqrt(distSq);
+                            normal.divideScalar(dist); // Collision normal
+
+                            const overlap = minDist - dist;
+
+                            // Positional correction to prevent sinking
+                            const m1 = masses[i];
+                            const m2 = masses[j];
+                            const totalM = m1 + m2;
+
+                            p1.addScaledVector(normal, -overlap * (m2 / totalM));
+                            p2.addScaledVector(normal, overlap * (m1 / totalM));
+
+                            // Relative velocity
+                            const relVel = new THREE.Vector3().subVectors(velocities[j], velocities[i]);
+                            const velAlongNormal = relVel.dot(normal);
+
+                            // Do not resolve if velocities are separating
+                            if (velAlongNormal < 0) {
+                                const impulseScalar = -(1 + restitution) * velAlongNormal / (1/m1 + 1/m2);
+
+                                velocities[i].addScaledVector(normal, -impulseScalar / m1);
+                                velocities[j].addScaledVector(normal, impulseScalar / m2);
+                            }
+                        }
+                    }
+                }
+
+                // 4. Box Wall Collisions
+                const halfW = boxWidth / 2;
+                const halfD = boxDepth / 2;
+
+                for (let i = 0; i < COUNT; i++) {
+                    const pos = positions[i];
+                    const vel = velocities[i];
+                    const r = radii[i];
+
+                    // Floor
+                    if (pos.y - r < 0) {
+                        pos.y = r;
+                        vel.y = -vel.y * restitution;
+                        vel.x *= 0.95; // Ground friction
+                        vel.z *= 0.95;
+                    }
+
+                    // Respawn if somehow escaped top boundary
+                    if (pos.y > boxHeight + 10) {
+                        pos.set(
+                            (Math.random() - 0.5) * (boxWidth - 2),
+                            boxHeight + Math.random() * 2,
+                            (Math.random() - 0.5) * (boxDepth - 2)
+                        );
+                        vel.set(0, 0, 0);
+                    }
+
+                    // Left Wall
+                    if (pos.x - r < -halfW) {
+                        pos.x = -halfW + r;
+                        vel.x = -vel.x * restitution;
+                    }
+                    // Right Wall
+                    if (pos.x + r > halfW) {
+                        pos.x = halfW - r;
+                        vel.x = -vel.x * restitution;
+                    }
+                    // Back Wall
+                    if (pos.z - r < -halfD) {
+                        pos.z = -halfD + r;
+                        vel.z = -vel.z * restitution;
+                    }
+                    // Front Wall
+                    if (pos.z + r > halfD) {
+                        pos.z = halfD - r;
+                        vel.z = -vel.z * restitution;
+                    }
+                }
+            }
+
+            // 5. Update InstancedMesh matrices
+            for (let i = 0; i < COUNT; i++) {
+                dummy.position.copy(positions[i]);
+                dummy.scale.set(radii[i], radii[i], radii[i]);
+                dummy.updateMatrix();
+                instancedMesh.setMatrixAt(i, dummy.matrix);
+            }
+            instancedMesh.instanceMatrix.needsUpdate = true;
+
+            // --- CAMERA ORBIT ---
+            const elapsedTime = clock.getElapsedTime() * 0.2;
+            const camDist = 18;
+            camera.position.x = Math.cos(elapsedTime) * camDist;
+            camera.position.z = Math.sin(elapsedTime) * camDist;
+            camera.position.y = 7 + Math.sin(elapsedTime * 0.5) * 3;
+            camera.lookAt(0, 4, 0);
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // --- RESIZE HANDLER ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

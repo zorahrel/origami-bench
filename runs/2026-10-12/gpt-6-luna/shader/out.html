@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Living Form</title>
+<style>
+html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#050914}
+canvas{display:block;width:100%;height:100%}
+</style>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+camera.position.z = 1;
+
+const uniforms = {
+  uTime: { value: 0 },
+  uResolution: { value: new THREE.Vector2(renderer.domElement.width, renderer.domElement.height) }
+};
+
+const material = new THREE.ShaderMaterial({
+  uniforms,
+  depthTest: false,
+  depthWrite: false,
+  toneMapped: false,
+  vertexShader: `
+    void main() {
+      gl_Position = vec4(position.xy, 0.0, 1.0);
+    }
+  `,
+  fragmentShader: `
+    precision highp float;
+    uniform float uTime;
+    uniform vec2 uResolution;
+
+    float sdBlob(vec3 p) {
+      vec3 q = p - vec3(0.0, 0.86, 0.0);
+      float radius = 0.77 + 0.055 * sin(uTime * 0.8);
+      float waveA = sin(q.x * 3.2 + uTime * 1.05)
+                  * sin(q.y * 3.5 - uTime * 0.82)
+                  * sin(q.z * 3.0 + uTime);
+      float waveB = sin(q.x * 5.0 - uTime * 0.65 + sin(q.z * 2.0))
+                  * cos(q.y * 4.4 + uTime * 0.73);
+      return length(q) - radius - 0.105 * waveA - 0.035 * waveB;
+    }
+
+    vec2 sceneMap(vec3 p) {
+      float blob = sdBlob(p);
+      float floorPlane = p.y;
+      return floorPlane < blob ? vec2(floorPlane, 1.0) : vec2(blob, 0.0);
+    }
+
+    vec2 rayMarch(vec3 ro, vec3 rd) {
+      float t = 0.0;
+      for (int i = 0; i < 110; i++) {
+        vec2 hit = sceneMap(ro + rd * t);
+        if (hit.x < 0.0015) return vec2(t, hit.y);
+        t += max(hit.x * 0.82, 0.002);
+        if (t > 38.0) break;
+      }
+      return vec2(38.0, -1.0);
+    }
+
+    vec3 calcNormal(vec3 p) {
+      float e = 0.0012;
+      return normalize(vec3(
+        sceneMap(p + vec3(e, 0.0, 0.0)).x - sceneMap(p - vec3(e, 0.0, 0.0)).x,
+        sceneMap(p + vec3(0.0, e, 0.0)).x - sceneMap(p - vec3(0.0, e, 0.0)).x,
+        sceneMap(p + vec3(0.0, 0.0, e)).x - sceneMap(p - vec3(0.0, 0.0, e)).x
+      ));
+    }
+
+    float softShadow(vec3 ro, vec3 rd, float maxT) {
+      float result = 1.0;
+      float t = 0.035;
+      for (int i = 0; i < 36; i++) {
+        if (t >= maxT) break;
+        float h = sceneMap(ro + rd * t).x;
+        if (h < 0.001) return 0.0;
+        result = min(result, 12.0 * h / t);
+        t += clamp(h, 0.025, 0.35);
+      }
+      return clamp(result, 0.0, 1.0);
+    }
+
+    float ambientOcclusion(vec3 p, vec3 n) {
+      float occlusion = 0.0;
+      float weight = 1.0;
+      for (int i = 1; i <= 5; i++) {
+        float h = 0.035 * float(i);
+        float d = sceneMap(p + n * h).x;
+        occlusion += (h - d) * weight;
+        weight *= 0.68;
+      }
+      return clamp(1.0 - 1.45 * occlusion, 0.25, 1.0);
+    }
+
+    vec3 skyColor(vec3 rd) {
+      float height = smoothstep(-0.35, 0.8, rd.y);
+      vec3 sky = mix(vec3(0.012, 0.019, 0.052), vec3(0.10, 0.23, 0.34), height);
+      sky += exp(-abs(rd.y) * 19.0) * vec3(0.025, 0.13, 0.19);
+      return sky;
+    }
+
+    void main() {
+      vec2 uv = (gl_FragCoord.xy * 2.0 - uResolution.xy) / uResolution.y;
+
+      vec3 target = vec3(0.0, 0.84, 0.0);
+      float orbit = uTime * 0.22;
+      vec3 ro = target + vec3(
+        3.45 * sin(orbit),
+        1.27 + 0.22 * sin(uTime * 0.31),
+        3.45 * cos(orbit)
+      );
+      vec3 forward = normalize(target - ro);
+      vec3 right = normalize(cross(forward, vec3(0.0, 1.0, 0.0)));
+      vec3 up = normalize(cross(right, forward));
+      vec3 rd = normalize(forward * 1.65 + right * uv.x + up * uv.y);
+
+      vec2 hit = rayMarch(ro, rd);
+      vec3 col = skyColor(rd);
+
+      if (hit.y >= 0.0) {
+        vec3 p = ro + rd * hit.x;
+        vec3 n = calcNormal(p);
+        vec3 lightPos = vec3(
+          2.8 * sin(uTime * 0.34),
+          4.6,
+          2.3 + 1.8 * cos(uTime * 0.29)
+        );
+        vec3 toLight = lightPos - p;
+        float lightDistance = length(toLight);
+        vec3 ld = toLight / lightDistance;
+        vec3 halfVector = normalize(ld - rd);
+        float ao = ambientOcclusion(p, n);
+        float shadow = softShadow(p + n * 0.012, ld, lightDistance);
+        float diffuse = max(dot(n, ld), 0.0);
+        float specularPower = hit.y < 0.5 ? 68.0 : 26.0;
+        float specular = pow(max(dot(n, halfVector), 0.0), specularPower);
+
+        vec3 base;
+        if (hit.y < 0.5) {
+          float bands = 0.5 + 0.5 * sin(p.y * 7.5 + sin(p.x * 4.0 + uTime));
+          base = mix(vec3(0.018, 0.12, 0.20), vec3(0.045, 0.60, 0.69), bands * 0.48);
+        } else {
+          vec2 tile = floor(p.xz * 1.25);
+          float checker = mod(tile.x + tile.y, 2.0);
+          base = mix(vec3(0.025, 0.040, 0.075), vec3(0.065, 0.105, 0.16), checker);
+          vec2 edge = min(fract(p.xz * 1.25), 1.0 - fract(p.xz * 1.25));
+          float grid = 1.0 - smoothstep(0.018, 0.055, min(edge.x, edge.y));
+          base = mix(base, vec3(0.10, 0.33, 0.40), grid * 0.42);
+        }
+
+        float fresnel = pow(1.0 - max(dot(n, -rd), 0.0), 4.0);
+        col = base * (0.16 + 0.20 * max(n.y, 0.0) + diffuse * shadow * 1.45) * ao;
+        col += vec3(1.0, 0.82, 0.62) * specular * shadow * 0.85;
+        if (hit.y < 0.5) {
+          col += fresnel * vec3(0.035, 0.62, 0.96) * 1.65;
+        }
+        float fog = 1.0 - exp(-hit.x * 0.018);
+        col = mix(col, skyColor(rd), fog * 0.58);
+      }
+
+      gl_FragColor = vec4(col, 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }
+  `
+});
+
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+scene.add(quad);
+
+function resize() {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  uniforms.uResolution.value.set(renderer.domElement.width, renderer.domElement.height);
+}
+window.addEventListener('resize', resize, { passive: true });
+
+renderer.setAnimationLoop((milliseconds) => {
+  uniforms.uTime.value = milliseconds * 0.001;
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

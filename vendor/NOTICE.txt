@@ -1,0 +1,2 @@
+three.module.js is three.js r170 (c) three.js authors, MIT licence: https://github.com/mrdoob/three.js/blob/dev/LICENSE
+It is only used to serve the CDN import locally while rendering, so runs are offline and reproducible.

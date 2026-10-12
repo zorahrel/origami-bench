@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Meridian · Clockwork Study</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+  body {
+    background: radial-gradient(ellipse at 50% 44%, #1b2830 0%, #0b1218 58%, #05080c 100%);
+    color: #d8c7a6;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  body::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 48%, rgba(1,4,7,.54) 100%);
+  }
+  header, footer { position: fixed; z-index: 2; pointer-events: none; }
+  header { left: clamp(20px, 4vw, 56px); top: clamp(20px, 4vh, 42px); }
+  .kicker, footer {
+    color: #9aa6a5; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: .2em; text-transform: uppercase;
+  }
+  .kicker { display: flex; align-items: center; gap: 10px; }
+  .kicker::before {
+    content: ""; width: 6px; height: 6px; border-radius: 50%;
+    background: #d39a58; box-shadow: 0 0 12px #d39a58;
+  }
+  h1 {
+    margin: 10px 0 0; color: #eee4d1; font: 500 clamp(17px, 2vw, 25px)/1.05 Georgia, serif;
+    letter-spacing: .08em;
+  }
+  h1 em { color: #c99c65; font-weight: 400; }
+  footer { right: clamp(20px, 4vw, 56px); bottom: clamp(20px, 4vh, 42px); text-align: right; }
+  footer span { display: block; }
+  footer span + span { margin-top: 5px; color: #c49a65; }
+  @media (max-width: 560px) {
+    .kicker, footer { font-size: 8px; letter-spacing: .14em; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="kicker">Horological instrument · No. 08</div>
+  <h1>MERIDIAN <em>ENGINE</em></h1>
+</header>
+<footer>
+  <span>13—27 tooth drive · eight wheels</span>
+  <span>60-step seconds · live escapement</span>
+</footer>
+<canvas id="machine" aria-label="An animated brass and steel clockwork machine"></canvas>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const canvas = document.querySelector('#machine');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setClearColor(0x000000, 0);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.18;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-6, 6, 3, -3, 0.1, 80);
+const target = new THREE.Vector3(0, -0.5, 0);
+
+scene.add(new THREE.HemisphereLight(0xc7e0e4, 0x111820, 1.65));
+const key = new THREE.DirectionalLight(0xffd29a, 3.1);
+key.position.set(-5, 7, 9);
+key.castShadow = true;
+key.shadow.mapSize.set(1536, 1536);
+key.shadow.camera.left = -8;
+key.shadow.camera.right = 8;
+key.shadow.camera.top = 6;
+key.shadow.camera.bottom = -6;
+key.shadow.camera.near = 0.1;
+key.shadow.camera.far = 35;
+key.shadow.bias = -0.00025;
+scene.add(key);
+const coolFill = new THREE.DirectionalLight(0x84b9d2, 2.25);
+coolFill.position.set(7, -3, 6);
+scene.add(coolFill);
+const rimLight = new THREE.PointLight(0xe1a45d, 18, 18, 2);
+rimLight.position.set(-5, 2.5, 4);
+scene.add(rimLight);
+const blueLight = new THREE.PointLight(0x6093b5, 15, 16, 2);
+blueLight.position.set(5, 3, 2);
+scene.add(blueLight);
+
+const machineRoot = new THREE.Group();
+machineRoot.position.copy(target);
+scene.add(machineRoot);
+const assembly = new THREE.Group();
+assembly.position.y = -target.y;
+machineRoot.add(assembly);
+
+const panelW = 11.6, panelH = 5.3, panelY = -0.5;
+const panelMat = new THREE.MeshStandardMaterial({ color: 0x14212a, metalness: 0.68, roughness: 0.48 });
+const frameMat = new THREE.MeshStandardMaterial({ color: 0x627078, metalness: 0.82, roughness: 0.28 });
+const darkMetal = new THREE.MeshStandardMaterial({ color: 0x35434a, metalness: 0.82, roughness: 0.38 });
+const brass = new THREE.MeshStandardMaterial({ color: 0xb88c52, metalness: 0.86, roughness: 0.27 });
+const paleBrass = new THREE.MeshStandardMaterial({ color: 0xe0bd7b, metalness: 0.82, roughness: 0.22 });
+
+function box(parent, x, y, z, w, h, d, material, cast = false) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+  mesh.position.set(x, y, z);
+  mesh.castShadow = cast;
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+function cylinderZ(parent, x, y, z, radius, height, material, segments = 32) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, segments), material);
+  mesh.rotation.x = Math.PI / 2;
+  mesh.position.set(x, y, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+function torus(parent, x, y, z, radius, tube, material, segments = 48) {
+  const mesh = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 8, segments), material);
+  mesh.position.set(x, y, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+
+const panel = box(assembly, 0, panelY, -0.66, panelW, panelH, 0.24, panelMat);
+panel.castShadow = true;
+const railYTop = panelY + panelH / 2 - 0.16;
+const railYBottom = panelY - panelH / 2 + 0.16;
+const railX = panelW / 2 - 0.16;
+box(assembly, 0, railYTop, -0.39, panelW - 0.14, 0.18, 0.13, frameMat);
+box(assembly, 0, railYBottom, -0.39, panelW - 0.14, 0.18, 0.13, frameMat);
+box(assembly, -railX, panelY, -0.39, 0.18, panelH - 0.14, 0.13, frameMat);
+box(assembly, railX, panelY, -0.39, 0.18, panelH - 0.14, 0.13, frameMat);
+box(assembly, 0, railYTop - 0.15, -0.47, panelW - 0.75, 0.018, 0.025, brass);
+box(assembly, 0, railYBottom + 0.15, -0.47, panelW - 0.75, 0.018, 0.025, brass);
+
+for (const x of [-5.42, 5.42]) {
+  for (const y of [railYTop, railYBottom]) {
+    cylinderZ(assembly, x, y, -0.29, 0.074, 0.11, paleBrass, 12);
+    box(assembly, x, y, -0.226, 0.075, 0.012, 0.008, darkMetal);
+  }
+}
+
+const teeth = [13, 15, 17, 19, 21, 23, 25, 27];
+const moduleSize = 0.062;
+const pitchRadii = teeth.map(n => moduleSize * n / 2);
+const spans = teeth.slice(0, -1).map((n, i) => moduleSize * (n + teeth[i + 1]) / 2);
+const trainLength = spans.reduce((a, b) => a + b, 0);
+const trainShift = (pitchRadii[pitchRadii.length - 1] - pitchRadii[0]) / 2;
+let nextX = -trainLength / 2 - trainShift;
+const centers = [];
+for (let i = 0; i < teeth.length; i++) {
+  if (i > 0) nextX += spans[i - 1];
+  centers.push(nextX);
+}
+
+const gearMats = [
+  new THREE.MeshStandardMaterial({ color: 0xb88a4b, metalness: 0.9, roughness: 0.25 }),
+  new THREE.MeshStandardMaterial({ color: 0x8297a1, metalness: 0.91, roughness: 0.24 }),
+  new THREE.MeshStandardMaterial({ color: 0xc08c5a, metalness: 0.88, roughness: 0.27 }),
+  new THREE.MeshStandardMaterial({ color: 0x8a9b9e, metalness: 0.9, roughness: 0.24 })
+];
+const webMats = [
+  new THREE.MeshStandardMaterial({ color: 0x493b2d, metalness: 0.83, roughness: 0.3 }),
+  new THREE.MeshStandardMaterial({ color: 0x53646a, metalness: 0.86, roughness: 0.3 })
+];
+const gearObjects = [];
+const gearY = 0.72;
+
+function makeGearShape(count, pitchRadius) {
+  const step = Math.PI * 2 / count;
+  const root = pitchRadius - moduleSize * 1.22;
+  const tip = pitchRadius + moduleSize;
+  const points = [];
+  for (let i = 0; i < count; i++) {
+    const c = i * step;
+    points.push(
+      [root, c - step * 0.5], [root, c - step * 0.30],
+      [tip, c - step * 0.18], [tip, c + step * 0.18],
+      [root, c + step * 0.30], [root, c + step * 0.5]
+    );
+  }
+  const shape = new THREE.Shape();
+  shape.moveTo(points[0][0] * Math.cos(points[0][1]), points[0][0] * Math.sin(points[0][1]));
+  for (let i = 1; i < points.length; i++) {
+    shape.lineTo(points[i][0] * Math.cos(points[i][1]), points[i][0] * Math.sin(points[i][1]));
+  }
+  shape.closePath();
+  const hole = new THREE.Path();
+  hole.absarc(0, 0, pitchRadius * 0.60, 0, Math.PI * 2, true);
+  shape.holes.push(hole);
+  return new THREE.ExtrudeGeometry(shape, {
+    depth: 0.164, bevelEnabled: true, bevelThickness: 0.018,
+    bevelSize: 0.012, bevelSegments: 2, steps: 1
+  });
+}
+
+for (let i = 0; i < teeth.length; i++) {
+  const n = teeth[i], radius = pitchRadii[i], x = centers[i];
+  const layer = i % 2 === 0 ? -0.035 : 0.035;
+  cylinderZ(assembly, x, gearY, -0.22, 0.055, 0.52, darkMetal, 24);
+  torus(assembly, x, gearY, -0.175, radius * 0.2, 0.026, frameMat, 32);
+
+  const wheel = new THREE.Group();
+  wheel.position.set(x, gearY, layer);
+  assembly.add(wheel);
+
+  const body = new THREE.Mesh(makeGearShape(n, radius), gearMats[i % gearMats.length]);
+  body.position.z = -0.1;
+  body.castShadow = true;
+  body.receiveShadow = true;
+  wheel.add(body);
+
+  const spokeCount = 5;
+  const spokeLength = radius * 0.55;
+  const spokeWidth = Math.max(0.019, radius * 0.075);
+  const spokeGeo = new THREE.BoxGeometry(spokeLength, spokeWidth, 0.052);
+  for (let s = 0; s < spokeCount; s++) {
+    const a = s * Math.PI * 2 / spokeCount;
+    const spoke = new THREE.Mesh(spokeGeo, webMats[i % 2]);
+    spoke.position.set(Math.cos(a) * radius * 0.425, Math.sin(a) * radius * 0.425, 0.025);
+    spoke.rotation.z = a;
+    spoke.castShadow = true;
+    wheel.add(spoke);
+  }
+  cylinderZ(wheel, 0, 0, 0.075, radius * 0.18, 0.15, gearMats[(i + 1) % gearMats.length], 32);
+  cylinderZ(wheel, 0, 0, 0.16, radius * 0.105, 0.045, paleBrass, 32);
+  torus(wheel, 0, 0, 0.13, radius * 0.59, 0.012, brass, 48);
+  torus(wheel, 0, 0, 0.11, radius * 0.88, 0.007, paleBrass, 64);
+
+  gearObjects.push({ wheel, teeth: n, sign: i % 2 === 0 ? 1 : -1 });
+}
+
+const pendulumX = (centers[3] + centers[4]) / 2;
+box(assembly, pendulumX, -0.13, 0.08, 0.07, 0.38, 0.16, darkMetal);
+box(assembly, pendulumX, -0.24, 0.16, 0.24, 0.055, 0.12, brass);
+torus(assembly, pendulumX, -0.34, 0.23, 0.13, 0.025, paleBrass, 40);
+cylinderZ(assembly, pendulumX, -0.34, 0.24, 0.052, 0.1, darkMetal, 24);
+
+const pendulum = new THREE.Group();
+pendulum.position.set(pendulumX, -0.34, 0.25);
+assembly.add(pendulum);
+const rodLength = 1.95;
+const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.042, rodLength, 16), paleBrass);
+rod.position.y = -rodLength / 2;
+rod.castShadow = true;
+pendulum.add(rod);
+const rodCore = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.014, rodLength * 0.82, 10), darkMetal);
+rodCore.position.set(0, -rodLength / 2, 0.026);
+pendulum.add(rodCore);
+
+const bobY = -2.03;
+const bob = new THREE.Mesh(
+  new THREE.SphereGeometry(1, 32, 24),
+  new THREE.MeshStandardMaterial({ color: 0x9b6e3f, metalness: 0.88, roughness: 0.22 })
+);
+bob.position.set(0, bobY, 0);
+bob.scale.set(0.25, 0.31, 0.18);
+bob.castShadow = true;
+bob.receiveShadow = true;
+pendulum.add(bob);
+torus(pendulum, 0, bobY, 0.13, 0.226, 0.026, paleBrass, 48);
+torus(pendulum, 0, bobY - 0.12, 0.08, 0.205, 0.014, brass, 48);
+cylinderZ(pendulum, 0, bobY, 0.18, 0.045, 0.055, paleBrass, 24);
+
+const dialX = centers[7] - 0.13, dialY = -1.62;
+const dialFace = new THREE.MeshStandardMaterial({ color: 0x0a1116, metalness: 0.55, roughness: 0.39 });
+cylinderZ(assembly, dialX, dialY, -0.105, 0.53, 0.13, darkMetal, 64);
+cylinderZ(assembly, dialX, dialY, -0.025, 0.47, 0.08, dialFace, 64);
+torus(assembly, dialX, dialY, 0.005, 0.515, 0.035, brass, 64);
+torus(assembly, dialX, dialY, 0.025, 0.442, 0.006, frameMat, 64);
+
+for (let i = 0; i < 60; i++) {
+  const a = i * Math.PI * 2 / 60;
+  const major = i % 5 === 0;
+  const length = major ? 0.085 : 0.038;
+  const mark = new THREE.Mesh(
+    new THREE.BoxGeometry(major ? 0.022 : 0.009, length, 0.014),
+    major ? paleBrass : brass
+  );
+  const r = 0.444 - length / 2;
+  mark.position.set(dialX + Math.sin(a) * r, dialY + Math.cos(a) * r, 0.038);
+  mark.rotation.z = -a;
+  assembly.add(mark);
+}
+for (let i = 0; i < 12; i++) {
+  const a = i * Math.PI * 2 / 12;
+  const bead = new THREE.Mesh(new THREE.SphereGeometry(0.018, 12, 8), paleBrass);
+  bead.position.set(dialX + Math.sin(a) * 0.31, dialY + Math.cos(a) * 0.31, 0.043);
+  assembly.add(bead);
+}
+
+const hand = new THREE.Group();
+hand.position.set(dialX, dialY, 0.07);
+assembly.add(hand);
+const handMat = new THREE.MeshStandardMaterial({
+  color: 0xd7623f, metalness: 0.48, roughness: 0.28,
+  emissive: 0x681d0c, emissiveIntensity: 0.7
+});
+const needle = new THREE.Mesh(new THREE.BoxGeometry(0.021, 0.37, 0.022), handMat);
+needle.position.y = 0.19;
+hand.add(needle);
+const counter = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.09, 0.025), brass);
+counter.position.y = -0.045;
+hand.add(counter);
+const needleTip = new THREE.Mesh(new THREE.SphereGeometry(0.025, 16, 12), handMat);
+needleTip.position.y = 0.39;
+hand.add(needleTip);
+cylinderZ(assembly, dialX, dialY, 0.102, 0.045, 0.055, paleBrass, 24);
+
+const pulseMat = new THREE.MeshStandardMaterial({
+  color: 0xff8a53, emissive: 0xf14f21, emissiveIntensity: 1.2,
+  metalness: 0.25, roughness: 0.24
+});
+const pulse = new THREE.Mesh(new THREE.SphereGeometry(0.027, 16, 12), pulseMat);
+pulse.position.set(dialX, dialY + 0.47, 0.045);
+assembly.add(pulse);
+
+function resize() {
+  const width = window.innerWidth, height = window.innerHeight;
+  renderer.setSize(width, height, false);
+  const portrait = height > width;
+  machineRoot.rotation.z = portrait ? -Math.PI / 2 : 0;
+  const fitWidth = portrait ? panelH + 0.5 : panelW + 0.7;
+  const fitHeight = portrait ? panelW + 0.7 : panelH + 0.5;
+  const aspect = width / height;
+  const viewHeight = Math.max(fitHeight, fitWidth / aspect);
+  camera.left = -viewHeight * aspect / 2;
+  camera.right = viewHeight * aspect / 2;
+  camera.top = viewHeight / 2;
+  camera.bottom = -viewHeight / 2;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize, { passive: true });
+resize();
+
+const startTime = performance.now();
+let lastSecond = -1;
+function animate(now) {
+  requestAnimationFrame(animate);
+  const t = (now - startTime) / 1000;
+
+  for (const item of gearObjects) {
+    item.wheel.rotation.z = item.sign * 0.72 * teeth[0] / item.teeth * t;
+  }
+  pendulum.rotation.z = 0.23 * Math.sin(t * Math.PI * 2 / 1.9);
+
+  const second = Math.floor(t);
+  if (second !== lastSecond) {
+    hand.rotation.z = -Math.PI * 2 * (second % 60) / 60;
+    lastSecond = second;
+  }
+  const tickPhase = t - Math.floor(t);
+  pulseMat.emissiveIntensity = 0.35 + 2.2 * Math.exp(-tickPhase * 11);
+
+  camera.position.set(
+    0.12 * Math.sin(t * 0.16),
+    -0.5 + 0.08 * Math.sin(t * 0.13),
+    20 + 0.18 * Math.sin(t * 0.11)
+  );
+  camera.lookAt(target);
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

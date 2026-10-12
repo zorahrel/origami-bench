@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Walking Humanoid</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050508;
+            font-family: sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+
+<script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+    // --- SCENE, CAMERA, RENDERER ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x050508);
+    scene.fog = new THREE.FogExp2(0x050508, 0.035);
+
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+    
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    // --- LIGHTS ---
+    const ambientLight = new THREE.AmbientLight(0x1a1a2e, 1.5);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffeedd, 2.0);
+    dirLight.position.set(5, 8, 4);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 1024;
+    dirLight.shadow.mapSize.height = 1024;
+    dirLight.shadow.bias = -0.001;
+    scene.add(dirLight);
+
+    const pointLight = new THREE.PointLight(0x00ffff, 3, 10);
+    pointLight.position.set(0, 3, 2);
+    scene.add(pointLight);
+
+    // --- ENVIRONMENT ---
+    const floorSize = 40;
+    const floorGeo = new THREE.PlaneGeometry(floorSize, floorSize, 40, 40);
+    const floorMat = new THREE.MeshStandardMaterial({
+        color: 0x111118,
+        roughness: 0.8,
+        metalness: 0.2
+    });
+    
+    // Create custom grid texture via canvas to avoid external assets
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#181822';
+    ctx.fillRect(0, 0, 512, 512);
+    ctx.strokeStyle = '#252535';
+    ctx.lineWidth = 8;
+    ctx.strokeRect(0, 0, 512, 512);
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(floorSize / 2, floorSize / 2);
+    floorMat.map = texture;
+
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // --- MATERIALS ---
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0xcca385, roughness: 0.6 });
+    const shirtMat = new THREE.MeshStandardMaterial({ color: 0x3355aa, roughness: 0.5 });
+    const pantsMat = new THREE.MeshStandardMaterial({ color: 0x222228, roughness: 0.7 });
+    const shoeMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4 });
+
+    // --- CHARACTER HIERARCHY ---
+    const character = new THREE.Group();
+    scene.add(character);
+
+    // Torso Group (Root of body movement)
+    const torso = new THREE.Group();
+    torso.position.y = 1.05;
+    character.add(torso);
+
+    // Chest / Upper Torso
+    const chestMesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 0.3), shirtMat);
+    chestMesh.position.y = 0.3;
+    chestMesh.castShadow = true;
+    torso.add(chestMesh);
+
+    // Head
+    const head = new THREE.Group();
+    head.position.set(0, 0.75, 0);
+    torso.add(head);
+
+    const headMesh = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.35, 0.3), skinMat);
+    headMesh.position.y = 0.15;
+    headMesh.castShadow = true;
+    head.add(headMesh);
+
+    // --- ARMS ---
+    function createArm(isLeft) {
+        const xOffset = isLeft ? 0.35 : -0.35;
+        
+        const shoulder = new THREE.Group();
+        shoulder.position.set(xOffset, 0.55, 0);
+        torso.add(shoulder);
+
+        const upperArm = new THREE.Group();
+        shoulder.add(upperArm);
+
+        const upperMesh = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.4, 0.15), shirtMat);
+        upperMesh.position.y = -0.2;
+        upperMesh.castShadow = true;
+        upperArm.add(upperMesh);
+
+        const elbow = new THREE.Group();
+        elbow.position.set(0, -0.4, 0);
+        upperArm.add(elbow);
+
+        const lowerArm = new THREE.Group();
+        elbow.add(lowerArm);
+
+        const lowerMesh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.35, 0.12), skinMat);
+        lowerMesh.position.y = -0.175;
+        lowerMesh.castShadow = true;
+        lowerArm.add(lowerMesh);
+
+        const hand = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.08), skinMat);
+        hand.position.set(0, -0.4, 0);
+        hand.castShadow = true;
+        lowerArm.add(hand);
+
+        return { shoulder, elbow };
+    }
+
+    const leftArm = createArm(true);
+    const rightArm = createArm(false);
+
+    // --- LEGS ---
+    function createLeg(isLeft) {
+        const xOffset = isLeft ? 0.15 : -0.15;
+
+        const hip = new THREE.Group();
+        hip.position.set(xOffset, 0, 0);
+        torso.add(hip);
+
+        const upperLeg = new THREE.Group();
+        hip.add(upperLeg);
+
+        const upperMesh = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.45, 0.18), pantsMat);
+        upperMesh.position.y = -0.225;
+        upperMesh.castShadow = true;
+        upperLeg.add(upperMesh);
+
+        const knee = new THREE.Group();
+        knee.position.set(0, -0.45, 0);
+        upperLeg.add(knee);
+
+        const lowerLeg = new THREE.Group();
+        knee.add(lowerLeg);
+
+        const lowerMesh = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.45, 0.15), pantsMat);
+        lowerMesh.position.y = -0.225;
+        lowerMesh.castShadow = true;
+        lowerLeg.add(lowerMesh);
+
+        const ankle = new THREE.Group();
+        ankle.position.set(0, -0.45, 0);
+        lowerLeg.add(ankle);
+
+        const foot = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.3), shoeMat);
+        foot.position.set(0, -0.06, 0.08);
+        foot.castShadow = true;
+        ankle.add(foot);
+
+        return { hip, knee, ankle };
+    }
+
+    const leftLeg = createLeg(true);
+    const rightLeg = createLeg(false);
+
+    // --- ANIMATION LOOP ---
+    const clock = new THREE.Clock();
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const t = clock.getElapsedTime() * 5; // Walk speed
+        const cycle = Math.sin(t);
+        const absCycle = Math.abs(cycle);
+
+        // --- WALKING BIOMECHANICS ---
+        
+        // Torso Bob & Tilt
+        torso.position.y = 1.05 + Math.abs(Math.sin(t * 2)) * 0.08;
+        torso.rotation.y = Math.sin(t) * 0.1; // Slight twist
+        torso.rotation.z = 0;
+        torso.rotation.x = 0.1; // Lean slightly forward
+
+        // Head stability (counter-rotation)
+        head.rotation.y = -Math.sin(t) * 0.1;
+        head.rotation.x = -0.1;
+
+        // Legs (Natural Gait)
+        // Hip swing (forward/backward)
+        leftLeg.hip.rotation.x = Math.sin(t) * 0.7;
+        rightLeg.hip.rotation.x = -Math.sin(t) * 0.7;
+
+        // Knee bend (only bend when leg is moving forward/up)
+        leftLeg.knee.rotation.x = Math.max(0, -Math.sin(t) * 1.0) + 0.1;
+        rightLeg.knee.rotation.x = Math.max(0, Math.sin(t) * 1.0) + 0.1;
+
+        // Ankle adjust to keep feet flat-ish
+        leftLeg.ankle.rotation.x = -leftLeg.hip.rotation.x * 0.5;
+        rightLeg.ankle.rotation.x = -rightLeg.hip.rotation.x * 0.5;
+
+        // Arms (Opposite to legs)
+        leftArm.shoulder.rotation.x = -Math.sin(t) * 0.5;
+        rightArm.shoulder.rotation.x = Math.sin(t) * 0.5;
+
+        // Elbow bend
+        leftArm.elbow.rotation.x = -0.5 - Math.max(0, Math.sin(t) * 0.5);
+        rightArm.elbow.rotation.x = -0.5 - Math.max(0, -Math.sin(t) * 0.5);
+
+        // --- CAMERA ORBIT ---
+        const camDist = 4.5;
+        const camHeight = 1.5;
+        const camSpeed = clock.getElapsedTime() * 0.3;
+        
+        camera.position.x = Math.cos(camSpeed) * camDist;
+        camera.position.z = Math.sin(camSpeed) * camDist;
+        camera.position.y = camHeight + Math.sin(camSpeed * 0.5) * 0.5;
+        camera.lookAt(0, 1.0, 0);
+
+        // Dynamic Point Light movement
+        pointLight.position.x = Math.sin(clock.getElapsedTime() * 1.5) * 2;
+        pointLight.position.z = Math.cos(clock.getElapsedTime() * 1.2) * 2;
+
+        renderer.render(scene, camera);
+    }
+
+    animate();
+
+    // --- RESIZE HANDLER ---
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+</script>
+</body>
+</html>

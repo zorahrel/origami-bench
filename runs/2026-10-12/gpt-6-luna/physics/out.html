@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Kinetic Vessel</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#07111b}
+canvas{display:block;width:100%;height:100%}
+.hud{position:fixed;inset:0;pointer-events:none;color:#e8f5f5}
+.brand{position:absolute;left:clamp(20px,4vw,54px);top:clamp(22px,4vh,44px)}
+.eyebrow{font-size:10px;letter-spacing:.24em;color:#75cbd0;font-weight:700}
+h1{font-size:clamp(19px,2.3vw,27px);letter-spacing:.045em;margin:8px 0 5px;font-weight:550}
+.sub{color:#8ba4b1;font-size:11px;letter-spacing:.13em}
+.readout{position:absolute;right:clamp(20px,4vw,54px);top:clamp(22px,4vh,44px);text-align:right}
+.count{font-variant-numeric:tabular-nums;font-size:22px;font-weight:550;letter-spacing:.04em}
+.count-label{font-size:9px;letter-spacing:.2em;color:#8ba4b1;margin-top:4px}
+.footer{position:absolute;left:clamp(20px,4vw,54px);right:clamp(20px,4vw,54px);bottom:clamp(20px,4vh,40px);display:flex;justify-content:space-between;align-items:center;color:#8ba4b1;font-size:9px;letter-spacing:.17em}
+.live{display:flex;align-items:center;gap:9px}
+.dot{width:6px;height:6px;border-radius:50%;background:#81e0ca;box-shadow:0 0 12px #81e0ca}
+.shaking .dot{background:#ffd185;box-shadow:0 0 13px #ffc36b}
+</style>
+</head>
+<body>
+<div class="hud">
+  <div class="brand">
+    <div class="eyebrow">KINETIC STUDY&nbsp; / &nbsp;01</div>
+    <h1>The Vessel</h1>
+    <div class="sub">GRAVITY · CONTACT · RESTITUTION</div>
+  </div>
+  <div class="readout">
+    <div class="count" id="count">168</div>
+    <div class="count-label">PARTICLES IN FIELD</div>
+  </div>
+  <div class="footer" id="footer">
+    <div class="live"><span class="dot"></span><span id="status">LIVE SIMULATION</span></div>
+    <div>PERIODIC VIBRATION&nbsp; · &nbsp;NO INPUT</div>
+  </div>
+</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07111b);
+scene.fog = new THREE.FogExp2(0x07111b, 0.022);
+
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:false});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.8));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
+
+const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.1, 100);
+const target = new THREE.Vector3(0, 3.0, 0);
+
+scene.add(new THREE.HemisphereLight(0xa9e8ed, 0x101c2b, 1.45));
+scene.add(new THREE.AmbientLight(0x7894b7, 0.42));
+
+const key = new THREE.DirectionalLight(0xffedcf, 3.1);
+key.position.set(-5, 12, 7);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.left = -8;
+key.shadow.camera.right = 8;
+key.shadow.camera.top = 11;
+key.shadow.camera.bottom = -7;
+key.shadow.camera.near = 0.5;
+key.shadow.camera.far = 32;
+key.shadow.bias = -0.00035;
+key.shadow.normalBias = 0.025;
+key.shadow.radius = 4;
+scene.add(key);
+
+const fill = new THREE.DirectionalLight(0x65c8e4, 1.15);
+fill.position.set(7, 6, -8);
+scene.add(fill);
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(120, 120),
+  new THREE.MeshStandardMaterial({color:0x08131d, roughness:0.92, metalness:0.08})
+);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.15;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const half = 2.7;
+const height = 6.7;
+const boxRig = new THREE.Group();
+boxRig.position.y = height / 2;
+scene.add(boxRig);
+
+const frameMat = new THREE.MeshStandardMaterial({color:0x355565, metalness:0.76, roughness:0.27});
+const edgeMat = new THREE.MeshStandardMaterial({color:0x77d6d5, emissive:0x123d40, emissiveIntensity:0.65, metalness:0.45, roughness:0.25});
+const glassMat = new THREE.MeshPhysicalMaterial({
+  color:0x7bd4da, metalness:0.24, roughness:0.19, transparent:true,
+  opacity:0.105, side:THREE.DoubleSide, depthWrite:false
+});
+function panel(w,h,d,x,y,z){
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), glassMat);
+  m.position.set(x,y,z);
+  m.renderOrder = 2;
+  m.receiveShadow = true;
+  boxRig.add(m);
+}
+function beam(w,h,d,x,y,z,material=frameMat){
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), material);
+  m.position.set(x,y,z);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  boxRig.add(m);
+}
+
+const floorMat = new THREE.MeshStandardMaterial({color:0x10212c, metalness:0.42, roughness:0.48});
+const floor = new THREE.Mesh(new THREE.BoxGeometry(half*2, 0.12, half*2), floorMat);
+floor.position.y = -height/2 + 0.015;
+floor.receiveShadow = true;
+floor.castShadow = true;
+boxRig.add(floor);
+
+panel(half*2, height, 0.035, 0, 0, -half);
+panel(half*2, height, 0.035, 0, 0, half);
+panel(0.035, height, half*2, -half, 0, 0);
+panel(0.035, height, half*2, half, 0, 0);
+
+const rail = 0.075;
+for (const x of [-half, half]) {
+  for (const z of [-half, half]) {
+    beam(rail, height, rail, x, 0, z, edgeMat);
+  }
+}
+for (const y of [-height/2, height/2]) {
+  beam(half*2, rail, rail, 0, y, -half, frameMat);
+  beam(half*2, rail, rail, 0, y, half, frameMat);
+  beam(rail, rail, half*2, -half, y, 0, frameMat);
+  beam(rail, rail, half*2, half, y, 0, frameMat);
+}
+
+const palette = [0xff7181,0xffbf66,0x5ce0c2,0x64b8ff,0xb794ff,0xf17ac8,0xe8e979]
+  .map(c => new THREE.Color(c));
+const particles = [];
+const MAX_PARTICLES = 220;
+const random = (min,max) => min + Math.random() * (max-min);
+
+function resetParticle(p, initial=false){
+  p.r = random(0.205, 0.33);
+  p.mass = p.r*p.r*p.r;
+  p.x = random(-half+p.r, half-p.r);
+  p.z = random(-half+p.r, half-p.r);
+  p.y = initial ? random(1.4, 9.3) : random(7.5, 9.1);
+  p.vx = initial ? random(-0.35,0.35) : random(-0.55,0.55);
+  p.vy = initial ? random(-0.8,0.2) : random(-0.7,-0.1);
+  p.vz = initial ? random(-0.35,0.35) : random(-0.55,0.55);
+  p.age = 0;
+  p.color = palette[Math.floor(Math.random()*palette.length)].clone()
+    .lerp(new THREE.Color(0xffffff), random(0.02,0.16));
+}
+for(let i=0;i<168;i++){
+  const p = {};
+  resetParticle(p, true);
+  particles.push(p);
+}
+
+const sphereGeometry = new THREE.SphereGeometry(1, 18, 14);
+const sphereMaterial = new THREE.MeshStandardMaterial({color:0xffffff, roughness:0.24, metalness:0.24});
+const spheres = new THREE.InstancedMesh(sphereGeometry, sphereMaterial, MAX_PARTICLES);
+spheres.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+spheres.castShadow = true;
+spheres.receiveShadow = true;
+spheres.count = particles.length;
+for(let i=0;i<particles.length;i++) spheres.setColorAt(i, particles[i].color);
+scene.add(spheres);
+
+const dummy = new THREE.Object3D();
+const RESTITUTION = 0.66;
+const WALL_FRICTION = 2.4;
+
+function collideWithBounds(p, dt){
+  const limitX = half - p.r;
+  if(p.x < -limitX){
+    p.x = -limitX;
+    if(p.vx < 0) p.vx = -p.vx * RESTITUTION;
+    p.vy *= Math.max(0, 1-WALL_FRICTION*dt);
+    p.vz *= Math.max(0, 1-WALL_FRICTION*dt);
+  } else if(p.x > limitX){
+    p.x = limitX;
+    if(p.vx > 0) p.vx = -p.vx * RESTITUTION;
+    p.vy *= Math.max(0, 1-WALL_FRICTION*dt);
+    p.vz *= Math.max(0, 1-WALL_FRICTION*dt);
+  }
+
+  const limitZ = half - p.r;
+  if(p.z < -limitZ){
+    p.z = -limitZ;
+    if(p.vz < 0) p.vz = -p.vz * RESTITUTION;
+    p.vx *= Math.max(0, 1-WALL_FRICTION*dt);
+    p.vy *= Math.max(0, 1-WALL_FRICTION*dt);
+  } else if(p.z > limitZ){
+    p.z = limitZ;
+    if(p.vz > 0) p.vz = -p.vz * RESTITUTION;
+    p.vx *= Math.max(0, 1-WALL_FRICTION*dt);
+    p.vy *= Math.max(0, 1-WALL_FRICTION*dt);
+  }
+
+  if(p.y < p.r){
+    p.y = p.r;
+    if(p.vy < 0){
+      p.vy = -p.vy * RESTITUTION;
+      if(p.vy < 0.38) p.vy = 0;
+    }
+    const damp = Math.max(0, 1-3.1*dt);
+    p.vx *= damp;
+    p.vz *= damp;
+  }
+}
+
+function resolvePairs(){
+  for(let i=0;i<particles.length;i++){
+    const a = particles[i];
+    for(let j=i+1;j<particles.length;j++){
+      const b = particles[j];
+      let dx=b.x-a.x, dy=b.y-a.y, dz=b.z-a.z;
+      const minDist=a.r+b.r;
+      const distSq=dx*dx+dy*dy+dz*dz;
+      if(distSq >= minDist*minDist) continue;
+
+      let dist=Math.sqrt(distSq);
+      if(dist < 1e-7){
+        dx=0.707; dy=0; dz=0.707; dist=1;
+      } else {
+        dx/=dist; dy/=dist; dz/=dist;
+      }
+
+      const invA=1/a.mass, invB=1/b.mass, invSum=invA+invB;
+      const overlap=minDist-dist;
+      const correction=Math.max(overlap-0.002,0)*0.78/invSum;
+      a.x-=dx*correction*invA; a.y-=dy*correction*invA; a.z-=dz*correction*invA;
+      b.x+=dx*correction*invB; b.y+=dy*correction*invB; b.z+=dz*correction*invB;
+
+      let rvx=b.vx-a.vx, rvy=b.vy-a.vy, rvz=b.vz-a.vz;
+      const along=rvx*dx+rvy*dy+rvz*dz;
+      if(along >= 0) continue;
+      const impulse=-(1+RESTITUTION)*along/invSum;
+      const ix=impulse*dx, iy=impulse*dy, iz=impulse*dz;
+      a.vx-=ix*invA; a.vy-=iy*invA; a.vz-=iz*invA;
+      b.vx+=ix*invB; b.vy+=iy*invB; b.vz+=iz*invB;
+
+      rvx=b.vx-a.vx; rvy=b.vy-a.vy; rvz=b.vz-a.vz;
+      const tx=rvx-(rvx*dx+rvy*dy+rvz*dz)*dx;
+      const ty=rvy-(rvx*dx+rvy*dy+rvz*dz)*dy;
+      const tz=rvz-(rvx*dx+rvy*dy+rvz*dz)*dz;
+      const tLen=Math.hypot(tx,ty,tz);
+      if(tLen>1e-8){
+        const frictionImpulse=Math.min(tLen/invSum, impulse*0.24);
+        const fx=tx/tLen*frictionImpulse, fy=ty/tLen*frictionImpulse, fz=tz/tLen*frictionImpulse;
+        a.vx+=fx*invA; a.vy+=fy*invA; a.vz+=fz*invA;
+        b.vx-=fx*invB; b.vy-=fy*invB; b.vz-=fz*invB;
+      }
+    }
+  }
+}
+
+let elapsed=0;
+let spawnTimer=0;
+let last=performance.now();
+let accumulator=0;
+const step=1/60;
+
+function addParticle(){
+  if(particles.length<MAX_PARTICLES){
+    const p={};
+    resetParticle(p, false);
+    particles.push(p);
+    spheres.setColorAt(particles.length-1,p.color);
+    return;
+  }
+  let slot=-1, oldest=-1;
+  for(let i=0;i<particles.length;i++){
+    const p=particles[i];
+    if(p.y < 2.1 && p.age > oldest){oldest=p.age;slot=i;}
+  }
+  if(slot<0){
+    for(let i=0;i<particles.length;i++){
+      if(particles[i].age>oldest){oldest=particles[i].age;slot=i;}
+    }
+  }
+  resetParticle(particles[slot], false);
+  spheres.setColorAt(slot,particles[slot].color);
+}
+
+function simulate(dt){
+  elapsed+=dt;
+  spawnTimer+=dt;
+  if(spawnTimer>0.145){
+    spawnTimer-=0.145;
+    addParticle();
+  }
+
+  const phase=(elapsed+6.7)%8.5;
+  let pulse=0;
+  if(phase<1.25){
+    const u=phase/1.25;
+    pulse=Math.sin(Math.PI*u)**2;
+  }
+  const shakeX=5.2*pulse*Math.sin(elapsed*31);
+  const shakeZ=3.8*pulse*Math.cos(elapsed*27);
+  boxRig.rotation.z=0.019*pulse*Math.sin(elapsed*31);
+  boxRig.rotation.x=0.016*pulse*Math.cos(elapsed*27);
+  boxRig.position.x=0.025*pulse*Math.sin(elapsed*31);
+  boxRig.position.z=0.022*pulse*Math.cos(elapsed*27);
+  document.getElementById('footer').classList.toggle('shaking',pulse>0.1);
+  document.getElementById('status').textContent=pulse>0.1?'VESSEL IN MOTION':'LIVE SIMULATION';
+
+  for(const p of particles){
+    p.age+=dt;
+    p.vx+=shakeX*dt;
+    p.vy-=9.8*dt;
+    p.vz+=shakeZ*dt;
+    p.x+=p.vx*dt;
+    p.y+=p.vy*dt;
+    p.z+=p.vz*dt;
+  }
+  resolvePairs();
+  for(const p of particles) collideWithBounds(p,dt);
+
+  spheres.count=particles.length;
+  for(let i=0;i<particles.length;i++){
+    const p=particles[i];
+    dummy.position.set(p.x,p.y,p.z);
+    dummy.scale.setScalar(p.r);
+    dummy.updateMatrix();
+    spheres.setMatrixAt(i,dummy.matrix);
+  }
+  spheres.instanceMatrix.needsUpdate=true;
+  document.getElementById('count').textContent=particles.length;
+}
+
+function resize(){
+  const w=window.innerWidth, h=window.innerHeight;
+  camera.aspect=w/h;
+  camera.fov=w/h<0.8?53:48;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w,h);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.8));
+}
+window.addEventListener('resize',resize);
+
+function animate(now){
+  requestAnimationFrame(animate);
+  const dt=Math.min((now-last)/1000,0.05);
+  last=now;
+  accumulator+=dt;
+  let steps=0;
+  while(accumulator>=step && steps<4){
+    simulate(step);
+    accumulator-=step;
+    steps++;
+  }
+  const orbit=elapsed*0.055+0.68;
+  const aspect=window.innerWidth/window.innerHeight;
+  const radius=aspect<0.8?17.5:12.6;
+  camera.position.set(Math.sin(orbit)*radius,7.8,Math.cos(orbit)*radius);
+  camera.lookAt(target);
+  renderer.render(scene,camera);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
