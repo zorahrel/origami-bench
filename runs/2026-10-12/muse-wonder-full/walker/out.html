@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Walking Humanoid</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0e1420}
+canvas{display:block;width:100%;height:100%}
+</style>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.05;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x0e1420);
+scene.fog=new THREE.Fog(0x0e1420,9,26);
+
+const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,0.1,100);
+
+// Lights
+scene.add(new THREE.AmbientLight(0x8899bb,0.55));
+scene.add(new THREE.HemisphereLight(0xbdd6ff,0x332211,0.5));
+
+const sun=new THREE.DirectionalLight(0xfff1d6,2.6);
+sun.position.set(4,8,3);
+sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-6;sun.shadow.camera.right=6;
+sun.shadow.camera.top=6;sun.shadow.camera.bottom=-6;
+sun.shadow.camera.near=1;sun.shadow.camera.far=22;
+sun.shadow.bias=-0.0004;
+sun.shadow.radius=4;
+scene.add(sun);
+
+const point=new THREE.PointLight(0xff4da6,18,14,1.8);
+point.position.set(-3,2.2,2.5);
+scene.add(point);
+
+const point2=new THREE.PointLight(0x33bbff,8,12,1.8);
+point2.position.set(3,1.2,-3);
+scene.add(point2);
+
+// Checkered floor (generated texture, no external asset)
+function checkerTexture(){
+  const c=document.createElement('canvas');c.width=c.height=256;
+  const g=c.getContext('2d'),s=128;
+  g.fillStyle='#e8e6df';g.fillRect(0,0,256,256);
+  g.fillStyle='#22262f';g.fillRect(0,0,s,s);g.fillRect(s,s,s,s);
+  const t=new THREE.CanvasTexture(c);
+  t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(14,14);
+  t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=8;
+  return t;
+}
+const floor=new THREE.Mesh(
+  new THREE.PlaneGeometry(40,40),
+  new THREE.MeshStandardMaterial({map:checkerTexture(),roughness:0.85,metalness:0.02})
+);
+floor.rotation.x=-Math.PI/2;
+floor.receiveShadow=true;
+scene.add(floor);
+
+// Materials
+const MAT={
+  skin:new THREE.MeshStandardMaterial({color:0xe8b08a,roughness:0.65}),
+  shirt:new THREE.MeshStandardMaterial({color:0x2f7fe0,roughness:0.7}),
+  sleeve:new THREE.MeshStandardMaterial({color:0x2568bd,roughness:0.7}),
+  pants:new THREE.MeshStandardMaterial({color:0x2b2f3a,roughness:0.8}),
+  shoe:new THREE.MeshStandardMaterial({color:0xe84a3c,roughness:0.55}),
+  hair:new THREE.MeshStandardMaterial({color:0x2a1d12,roughness:0.9}),
+  belt:new THREE.MeshStandardMaterial({color:0x15171c,roughness:0.6})
+};
+
+// Helpers: pivot group at joint, limb mesh hangs down -Y from it
+function joint(parent,x,y,z){
+  const g=new THREE.Group();g.position.set(x,y,z);parent.add(g);return g;
+}
+function segment(parent,len,r,mat){
+  const m=new THREE.Mesh(new THREE.CapsuleGeometry(r,Math.max(0.01,len-r*1.2),6,14),mat);
+  m.position.y=-len/2;m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;
+}
+function ball(parent,r,mat,x=0,y=0,z=0){
+  const m=new THREE.Mesh(new THREE.SphereGeometry(r,20,16),mat);
+  m.position.set(x,y,z);m.castShadow=true;parent.add(m);return m;
+}
+function box(parent,w,h,d,mat,x=0,y=0,z=0){
+  const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+  m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;
+}
+function roundedBox(parent,w,h,d,mat,x,y,z){
+  // capsule scaled to a soft torso block
+  const m=new THREE.Mesh(new THREE.CapsuleGeometry(0.5,0.5,6,16),mat);
+  m.scale.set(w,h,d);m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;
+}
+
+// ---- Humanoid hierarchy (facing +Z) ----
+const character=new THREE.Group();scene.add(character);
+const HIP_Y=0.98;
+const hips=joint(character,0,HIP_Y,0);
+
+// Pelvis
+roundedBox(hips,0.62,0.42,0.42,MAT.pants,0,0.02,0);
+box(hips,0.38,0.07,0.26,MAT.belt,0,0.14,0);
+
+// Torso
+const torso=joint(hips,0,0.12,0);
+roundedBox(torso,0.72,0.85,0.48,MAT.shirt,0,0.30,0);
+// chest stripe detail
+box(torso,0.40,0.06,0.02,new THREE.MeshStandardMaterial({color:0xffd34d,roughness:0.6}),0,0.36,0.175);
+
+// Neck + Head
+const neck=joint(torso,0,0.58,0);
+const neckMesh=new THREE.Mesh(new THREE.CylinderGeometry(0.055,0.065,0.12,14),MAT.skin);
+neckMesh.position.y=0.03;neckMesh.castShadow=true;neck.add(neckMesh);
+const head=joint(neck,0,0.10,0);
+ball(head,0.165,MAT.skin,0,0.14,0);
+// hair cap
+const hair=new THREE.Mesh(new THREE.SphereGeometry(0.172,20,16,0,Math.PI*2,0,Math.PI*0.55),MAT.hair);
+hair.position.set(0,0.155,-0.012);hair.castShadow=true;head.add(hair);
+// eyes
+ball(head,0.018,MAT.belt,-0.058,0.15,0.15);
+ball(head,0.018,MAT.belt, 0.058,0.15,0.15);
+// nose
+ball(head,0.022,MAT.skin,0,0.115,0.165);
+
+// Arms
+function buildArm(side){ // side: -1 left(+X?) keep sign as x offset
+  const shoulder=joint(torso,side*0.30,0.48,0);
+  ball(shoulder,0.085,MAT.sleeve);
+  segment(shoulder,0.30,0.068,MAT.sleeve);           // upper arm
+  const elbow=joint(shoulder,0,-0.30,0);
+  ball(elbow,0.058,MAT.skin);
+  segment(elbow,0.27,0.055,MAT.skin);                // forearm
+  const wrist=joint(elbow,0,-0.27,0);
+  const hand=ball(wrist,0.065,MAT.skin,0,-0.05,0);   // hand
+  hand.scale.set(0.85,1.25,0.55);
+  shoulder.rotation.z=side*0.10; // arms hang slightly outward
+  return{shoulder,elbow,wrist};
+}
+const armL=buildArm(1), armR=buildArm(-1);
+
+// Legs
+function buildLeg(side){
+  const hip=joint(hips,side*0.13,-0.04,0);
+  ball(hip,0.09,MAT.pants);
+  segment(hip,0.44,0.085,MAT.pants);                 // thigh
+  const knee=joint(hip,0,-0.44,0);
+  ball(knee,0.07,MAT.pants);
+  segment(knee,0.42,0.065,MAT.pants);                // shin
+  const ankle=joint(knee,0,-0.42,0);
+  ball(ankle,0.05,MAT.skin);
+  box(ankle,0.10,0.06,0.25,MAT.shoe,0,-0.035,0.055); // foot, toe toward +Z
+  box(ankle,0.105,0.025,0.26,new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.6}),0,-0.065,0.055);
+  return{hip,knee,ankle};
+}
+const legL=buildLeg(1), legR=buildLeg(-1);
+
+// Soft coloured glow disc under point light path (visual anchor for the coloured light)
+const glow=new THREE.Mesh(new THREE.SphereGeometry(0.06,14,10),
+  new THREE.MeshBasicMaterial({color:0xff4da6}));
+scene.add(glow);
+
+// ---- Animation: walk in place ----
+const clock=new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const t=clock.getElapsedTime();
+  const p=t*5.0;                       // gait phase
+  const s=Math.sin(p), c=Math.cos(p);
+
+  // Legs: opposite swing. Forward (+Z) = negative rotation.x
+  legL.hip.rotation.x=-0.58*s;
+  legR.hip.rotation.x= 0.58*s;
+  // Knees bend only during the swing-forward half of each leg's cycle
+  legL.knee.rotation.x=0.07+Math.max(0, c)*0.95;
+  legR.knee.rotation.x=0.07+Math.max(0,-c)*0.95;
+  // Ankles compensate so feet stay roughly flat, plus toe push-off
+  legL.ankle.rotation.x=-(legL.hip.rotation.x+legL.knee.rotation.x)*0.55+0.18*Math.sin(p-0.7);
+  legR.ankle.rotation.x=-(legR.hip.rotation.x+legR.knee.rotation.x)*0.55+0.18*Math.sin(p+Math.PI-0.7);
+
+  // Arms swing opposite to the same-side leg
+  armL.shoulder.rotation.x= 0.52*s;
+  armR.shoulder.rotation.x=-0.52*s;
+  armL.shoulder.rotation.z= 0.10+0.03*s;
+  armR.shoulder.rotation.z=-0.10+0.03*s;
+  // Elbows stay bent, bend more as the arm comes forward
+  armL.elbow.rotation.x=-0.35-0.38*Math.max(0,-s);
+  armR.elbow.rotation.x=-0.35-0.38*Math.max(0, s);
+  armL.wrist.rotation.x=-0.10+0.08*Math.sin(p+0.5);
+  armR.wrist.rotation.x=-0.10+0.08*Math.sin(p+Math.PI+0.5);
+
+  // Body bob (twice per cycle), sway, hip roll and twist
+  hips.position.y=HIP_Y+0.035*Math.cos(2*p)-0.015;
+  hips.position.x=0.025*s;
+  hips.rotation.z=0.055*s;
+  hips.rotation.y=0.08*s;
+
+  // Torso: slight forward lean, counter-twist against hips, breathing-scale sway
+  torso.rotation.x=0.09+0.02*Math.cos(2*p);
+  torso.rotation.y=-0.11*s;
+  torso.rotation.z=-0.03*s;
+
+  // Head stabilises against torso twist, gentle nod
+  head.rotation.y=0.07*s;
+  head.rotation.x=-0.05+0.03*Math.cos(2*p+0.4);
+  head.rotation.z=-0.02*s;
+
+  // Orbiting camera
+  const a=t*0.35, r=5.4;
+  camera.position.set(Math.sin(a)*r,2.25+0.45*Math.sin(t*0.23),Math.cos(a)*r);
+  camera.lookAt(0,1.02,0);
+
+  // Coloured point light slowly circles the character
+  const pa=-t*0.55;
+  point.position.set(Math.sin(pa)*3.2,2.0+0.6*Math.sin(t*0.8),Math.cos(pa)*3.2);
+  glow.position.copy(point.position);
+  point2.intensity=7+3*Math.sin(t*1.3);
+
+  renderer.render(scene,camera);
+}
+animate();
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>

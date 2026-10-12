@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Physics Sandbox</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#0e1420;font-family:system-ui,sans-serif}canvas{display:block}
+#hud{position:fixed;left:14px;top:12px;color:#eaf2ff;text-shadow:0 1px 8px #000;pointer-events:none}
+#hud b{font-size:16px;letter-spacing:.04em}#hud span{display:block;opacity:.75;font-size:12px;margin-top:3px}</style>
+</head><body><div id="hud"><b>3D PHYSICS SANDBOX</b><span>220 spheres · custom collisions · no physics library</span></div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.05;
+document.body.appendChild(renderer.domElement);
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x0e1420);
+scene.fog=new THREE.Fog(0x0e1420,24,48);
+const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,0.1,100);
+
+scene.add(new THREE.HemisphereLight(0xcfe6ff,0x243047,1.6));
+const sun=new THREE.DirectionalLight(0xffffff,2.8);
+sun.position.set(7,14,5); sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-9; sun.shadow.camera.right=9;
+sun.shadow.camera.top=9; sun.shadow.camera.bottom=-9;
+sun.shadow.camera.near=2; sun.shadow.camera.far=32;
+sun.shadow.bias=-0.0004; sun.shadow.normalBias=0.02;
+scene.add(sun);
+const rim=new THREE.DirectionalLight(0x7fb4ff,0.8); rim.position.set(-8,5,-7); scene.add(rim);
+
+// Ground outside the box
+const ground=new THREE.Mesh(new THREE.CircleGeometry(34,48),
+  new THREE.MeshStandardMaterial({color:0x172235,roughness:0.95,metalness:0}));
+ground.rotation.x=-Math.PI/2; ground.position.y=-0.32; ground.receiveShadow=true; scene.add(ground);
+
+// Glass open box: interior x,z in [-4,4], floor y=0, wall height 6
+const HX=4,HZ=4,WALL_H=6;
+const boxGroup=new THREE.Group(); scene.add(boxGroup);
+const floor=new THREE.Mesh(new THREE.BoxGeometry(HX*2,0.3,HZ*2),
+  new THREE.MeshStandardMaterial({color:0xd7dee8,roughness:0.55,metalness:0.05}));
+floor.position.y=-0.15; floor.receiveShadow=true; floor.castShadow=true; boxGroup.add(floor);
+
+const glassMat=new THREE.MeshPhysicalMaterial({color:0xbfe3ff,transparent:true,opacity:0.13,
+  roughness:0.06,metalness:0,clearcoat:1,clearcoatRoughness:0.08,side:THREE.DoubleSide,depthWrite:false});
+function wall(w,h,x,y,z,ry){const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),glassMat);
+  m.position.set(x,y,z); m.rotation.y=ry; boxGroup.add(m);}
+wall(HX*2,WALL_H,0,WALL_H/2,-HZ,0); wall(HX*2,WALL_H,0,WALL_H/2,HZ,Math.PI);
+wall(HZ*2,WALL_H,-HX,WALL_H/2,0,Math.PI/2); wall(HZ*2,WALL_H,HX,WALL_H/2,0,-Math.PI/2);
+const edges=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(HX*2,WALL_H,HZ*2)),
+  new THREE.LineBasicMaterial({color:0x9fd4ff,transparent:true,opacity:0.85}));
+edges.position.y=WALL_H/2; boxGroup.add(edges);
+
+// Spheres (InstancedMesh)
+const MAX=220;
+const geo=new THREE.SphereGeometry(1,22,16);
+const mat=new THREE.MeshStandardMaterial({roughness:0.32,metalness:0.08});
+const mesh=new THREE.InstancedMesh(geo,mat,MAX);
+mesh.castShadow=true; mesh.receiveShadow=true; mesh.frustumCulled=false;
+mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(mesh);
+
+const palette=[0xff5a5f,0xffb340,0xffe14d,0x5ee06e,0x33c7ff,0x6a7cff,0xc86bff,0xff6bd6,0x3ff2c8,0xff8a3d];
+const bodies=[];
+const col=new THREE.Color();
+for(let i=0;i<MAX;i++){
+  const r=0.22+Math.random()*0.27;
+  const m=r*r*r;
+  bodies.push({r,m,im:1/m,active:false,
+    p:new THREE.Vector3(0,-20,0),v:new THREE.Vector3(),
+    q:new THREE.Quaternion(),av:new THREE.Vector3()});
+  col.setHex(palette[i%palette.length]).offsetHSL((Math.random()-0.5)*0.04,0,(Math.random()-0.5)*0.08);
+  mesh.setColorAt(i,col);
+}
+mesh.instanceColor.needsUpdate=true;
+
+let activeCount=0,spawnTimer=0;
+function spawn(b){
+  b.active=true; activeCount++;
+  b.p.set((Math.random()*2-1)*(HX-b.r-0.15),7+Math.random()*3.5,(Math.random()*2-1)*(HZ-b.r-0.15));
+  b.v.set((Math.random()-0.5)*1.2,-1-Math.random(),(Math.random()-0.5)*1.2);
+}
+for(let i=0;i<45;i++) spawn(bodies[i]);
+
+// --- physics ---
+const GRAV=-19,REST_S=0.32,REST_W=0.42;
+let boxX=0,boxZ=0,boxVX=0,boxVZ=0,lastBoxX=0,lastBoxZ=0,shakeFired=-1;
+const delta=new THREE.Vector3(),rel=new THREE.Vector3(),tan=new THREE.Vector3();
+
+function step(dt,t){
+  // periodic shake: 0.9 s burst every 7 s, box centre oscillates and pile gets a kick
+  const cycle=Math.floor(t/7),phase=t-cycle*7;
+  let targetX=0,targetZ=0;
+  if(phase<0.9){
+    const decay=1-phase/0.9, a=0.28*decay;
+    targetX=Math.sin(t*38)*a; targetZ=Math.cos(t*31)*a*0.7;
+    if(shakeFired!==cycle && cycle>0){
+      shakeFired=cycle;
+      for(const b of bodies) if(b.active && Math.random()<0.55){
+        b.v.y+=2+Math.random()*3.2; b.v.x+=(Math.random()-0.5)*3; b.v.z+=(Math.random()-0.5)*3;
+      }
+    }
+  }
+  boxVX=(targetX-lastBoxX)/Math.max(dt,1e-4); boxVZ=(targetZ-lastBoxZ)/Math.max(dt,1e-4);
+  lastBoxX=boxX=targetX; lastBoxZ=boxZ=targetZ;
+
+  const SUB=3,h=dt/SUB;
+  for(let s=0;s<SUB;s++){
+    for(const b of bodies){
+      if(!b.active) continue;
+      b.v.y+=GRAV*h;
+      b.v.multiplyScalar(0.9995);
+      b.p.addScaledVector(b.v,h);
+      // floor
+      if(b.p.y<b.r){ b.p.y=b.r;
+        if(b.v.y<0) b.v.y=-b.v.y*REST_W;
+        if(Math.abs(b.v.y)<0.35) b.v.y=0;
+        b.v.x*=0.94; b.v.z*=0.94; // floor friction
+      }
+      // walls (moving with the shaken box)
+      const lx=b.p.x-boxX, lz=b.p.z-boxZ;
+      if(lx>HX-b.r){ b.p.x=boxX+HX-b.r; if(b.v.x>boxVX)b.v.x=boxVX-(b.v.x-boxVX)*REST_W; b.v.y*=0.97;b.v.z*=0.97; }
+      else if(lx<-(HX-b.r)){ b.p.x=boxX-HX+b.r; if(b.v.x<boxVX)b.v.x=boxVX-(b.v.x-boxVX)*REST_W; b.v.y*=0.97;b.v.z*=0.97; }
+      if(lz>HZ-b.r){ b.p.z=boxZ+HZ-b.r; if(b.v.z>boxVZ)b.v.z=boxVZ-(b.v.z-boxVZ)*REST_W; b.v.y*=0.97;b.v.x*=0.97; }
+      else if(lz<-(HZ-b.r)){ b.p.z=boxZ-HZ+b.r; if(b.v.z<boxVZ)b.v.z=boxVZ-(b.v.z-boxVZ)*REST_W; b.v.y*=0.97;b.v.x*=0.97; }
+      if(b.p.y<-2){ b.p.set(boxX,8,boxZ); b.v.set(0,0,0); } // safety recycle
+    }
+    // sphere vs sphere
+    for(let i=0;i<MAX;i++){
+      const a=bodies[i]; if(!a.active) continue;
+      for(let j=i+1;j<MAX;j++){
+        const b=bodies[j]; if(!b.active) continue;
+        delta.subVectors(b.p,a.p);
+        const min=a.r+b.r, d2=delta.lengthSq();
+        if(d2>=min*min||d2===0) continue;
+        const d=Math.sqrt(d2); delta.multiplyScalar(1/d);
+        const overlap=min-d, tot=a.im+b.im;
+        a.p.addScaledVector(delta,-overlap*(a.im/tot));
+        b.p.addScaledVector(delta, overlap*(b.im/tot));
+        rel.subVectors(b.v,a.v);
+        const vn=rel.dot(delta);
+        if(vn<0){
+          const jimp=-(1+REST_S)*vn/tot;
+          a.v.addScaledVector(delta,-jimp*a.im);
+          b.v.addScaledVector(delta, jimp*b.im);
+          // tangential friction
+          tan.copy(rel).addScaledVector(delta,-vn);
+          const tl=tan.length();
+          if(tl>1e-6){ tan.multiplyScalar(1/tl);
+            const f=Math.min(tl*0.25/tot, jimp*0.6);
+            a.v.addScaledVector(tan, f*a.im);
+            b.v.addScaledVector(tan,-f*b.im);
+          }
+        }
+      }
+    }
+  }
+}
+
+// --- render loop ---
+const dummy=new THREE.Object3D();
+const clock=new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const dt=Math.min(clock.getDelta(),0.033), t=clock.elapsedTime;
+
+  spawnTimer-=dt;
+  if(activeCount<MAX && spawnTimer<=0){ spawnTimer=0.09; spawn(bodies[activeCount]); }
+
+  step(Math.max(dt,0.0001),t);
+  boxGroup.position.x=boxX; boxGroup.position.z=boxZ;
+
+  for(let i=0;i<MAX;i++){
+    const b=bodies[i];
+    dummy.position.copy(b.p);
+    const s=b.active?b.r:0.0001; dummy.scale.setScalar(s);
+    dummy.quaternion.identity();
+    dummy.updateMatrix(); mesh.setMatrixAt(i,dummy.matrix);
+  }
+  mesh.instanceMatrix.needsUpdate=true;
+
+  const ang=t*0.13;
+  camera.position.set(Math.sin(ang)*14.5, 8.5+Math.sin(t*0.21)*1.2, Math.cos(ang)*14.5);
+  camera.lookAt(0,2.1,0);
+  renderer.render(scene,camera);
+}
+animate();
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script></body></html>

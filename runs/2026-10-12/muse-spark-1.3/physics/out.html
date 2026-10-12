@@ -3,267 +3,145 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>3D Physics Sandbox</title>
+<title>Physics Sandbox - No Library</title>
 <style>
-html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#101623;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
-canvas{display:block;width:100%;height:100%}
-#label{position:fixed;left:16px;top:14px;color:#eaf4ff;background:rgba(10,16,28,.42);border:1px solid rgba(255,255,255,.16);border-radius:10px;padding:9px 12px;font-size:13px;line-height:1.35;pointer-events:none;backdrop-filter:blur(6px)}
-#label b{font-size:14px}
-#label span{opacity:.78}
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0b1020;font-family:system-ui,sans-serif}
+#app{position:fixed;inset:0}
+canvas{display:block}
+#hud{position:fixed;top:12px;left:12px;color:#dbe7ff;background:rgba(10,16,34,.55);border:1px solid rgba(140,180,255,.25);padding:8px 12px;border-radius:10px;font-size:13px;backdrop-filter:blur(6px);pointer-events:none;user-select:none}
+#hud b{color:#fff}
 </style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
 </head>
 <body>
-<div id="label"><b>Physics Sandbox</b><br><span>200 spheres · custom collisions · periodic shake</span></div>
+<div id="app"></div>
+<div id="hud"><b>170 spheres</b> · custom physics · shake <span id="st">—</span></div>
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
-
-const renderer = new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
-renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
-renderer.setSize(window.innerWidth,window.innerHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.08;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-document.body.appendChild(renderer.domElement);
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x101623);
-scene.fog = new THREE.Fog(0x101623,28,62);
-
-const camera = new THREE.PerspectiveCamera(50,window.innerWidth/window.innerHeight,0.1,200);
-
-scene.add(new THREE.HemisphereLight(0xcfe6ff,0x263047,1.65));
-const sun = new THREE.DirectionalLight(0xffffff,3.2);
-sun.position.set(9,17,7);
-sun.castShadow = true;
+const N=170, H=5, WALL_H=6, GRAV=-18, E_WALL=0.5, E_FLOOR=0.42, E_BALL=0.32;
+const app=document.getElementById('app');
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+app.appendChild(renderer.domElement);
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x0b1020);
+scene.fog=new THREE.Fog(0x0b1020,28,70);
+const camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,0.1,200);
+scene.add(new THREE.HemisphereLight(0xbcd4ff,0x1a2035,0.9));
+scene.add(new THREE.AmbientLight(0xffffff,0.25));
+const sun=new THREE.DirectionalLight(0xffffff,2.2);
+sun.position.set(10,18,7);
+sun.castShadow=true;
 sun.shadow.mapSize.set(2048,2048);
-sun.shadow.camera.near = 1;
-sun.shadow.camera.far = 45;
-sun.shadow.camera.left = -12;
-sun.shadow.camera.right = 12;
-sun.shadow.camera.top = 12;
-sun.shadow.camera.bottom = -12;
-sun.shadow.bias = -0.00035;
-sun.shadow.normalBias = 0.025;
+sun.shadow.camera.left=-14;sun.shadow.camera.right=14;
+sun.shadow.camera.top=14;sun.shadow.camera.bottom=-14;
+sun.shadow.camera.far=50;sun.shadow.bias=-0.0004;
 scene.add(sun);
-const fill = new THREE.DirectionalLight(0x7fb7ff,0.75);
-fill.position.set(-8,6,-9);
-scene.add(fill);
-
-// Dimensioni scatola: aperta sopra, pavimento a y=0
-const BOX = {hx:5,hz:5,height:7};
-const MAX = 200;
-
-// Terreno esterno
-const ground = new THREE.Mesh(
-  new THREE.CircleGeometry(34,48),
-  new THREE.MeshStandardMaterial({color:0x182136,roughness:0.95,metalness:0})
-);
-ground.rotation.x = -Math.PI/2;
-ground.position.y = -0.315;
-ground.receiveShadow = true;
-scene.add(ground);
-
-// Scatola di vetro (gruppo scosso periodicamente)
-const boxGroup = new THREE.Group();
-scene.add(boxGroup);
-
-const slab = new THREE.Mesh(
-  new THREE.BoxGeometry(BOX.hx*2+0.35,0.3,BOX.hz*2+0.35),
-  new THREE.MeshStandardMaterial({color:0x2a3550,roughness:0.72,metalness:0.08})
-);
-slab.position.y = -0.15;
-slab.castShadow = true;
-slab.receiveShadow = true;
-boxGroup.add(slab);
-
-const glassMat = new THREE.MeshPhysicalMaterial({
-  color:0xbfe9ff,transparent:true,opacity:0.15,roughness:0.06,metalness:0,
-  clearcoat:0.6,clearcoatRoughness:0.15,side:THREE.DoubleSide,depthWrite:false
-});
-function addWall(w,h,x,y,z,ry){
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w,h),glassMat);
-  m.position.set(x,y,z); m.rotation.y = ry; m.renderOrder = 5;
-  boxGroup.add(m);
+const rim=new THREE.DirectionalLight(0x66aaff,0.7);
+rim.position.set(-9,7,-10);scene.add(rim);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(120,120),new THREE.MeshStandardMaterial({color:0x11182e,roughness:0.9,metalness:0}));
+ground.rotation.x=-Math.PI/2;ground.position.y=-0.02;ground.receiveShadow=true;scene.add(ground);
+const grid=new THREE.GridHelper(60,60,0x2a3d66,0x1a2542);
+grid.position.y=0.01;scene.add(grid);
+const boxGroup=new THREE.Group();scene.add(boxGroup);
+const glassMat=new THREE.MeshPhysicalMaterial({color:0x9fd4ff,transparent:true,opacity:0.13,roughness:0.08,metalness:0,side:THREE.DoubleSide});
+const floorGlass=new THREE.Mesh(new THREE.BoxGeometry(H*2,0.15,WALL_H*0+ H*2),new THREE.MeshPhysicalMaterial({color:0x9fd4ff,transparent:true,opacity:0.18,roughness:0.15}));
+floorGlass.position.y=-0.075;floorGlass.receiveShadow=true;boxGroup.add(floorGlass);
+function wall(w,h,x,y,z,ry){
+const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),glassMat);
+m.position.set(x,y,z);m.rotation.y=ry;boxGroup.add(m);
+const e=new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),new THREE.LineBasicMaterial({color:0x7fb8ff,transparent:true,opacity:0.9}));
+e.position.copy(m.position);e.rotation.copy(m.rotation);boxGroup.add(e);
+return m;
 }
-addWall(BOX.hx*2,BOX.height,0,BOX.height/2, BOX.hz,0);
-addWall(BOX.hx*2,BOX.height,0,BOX.height/2,-BOX.hz,Math.PI);
-addWall(BOX.hz*2,BOX.height, BOX.hx,BOX.height/2,0,-Math.PI/2);
-addWall(BOX.hz*2,BOX.height,-BOX.hx,BOX.height/2,0, Math.PI/2);
-
-// Telaio: montanti angolari e bordo superiore
-const frameMat = new THREE.MeshStandardMaterial({color:0x9fc7e8,roughness:0.3,metalness:0.65});
-function addBar(sx,sy,sz,x,y,z){
-  const m = new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),frameMat);
-  m.position.set(x,y,z); m.castShadow = true; boxGroup.add(m);
+wall(H*2,WALL_H,0,WALL_H/2,-H,0);
+wall(H*2,WALL_H,0,WALL_H/2,H,0);
+wall(H*2,WALL_H,-H,WALL_H/2,0,Math.PI/2);
+wall(H*2,WALL_H,H,WALL_H/2,0,Math.PI/2);
+const geo=new THREE.SphereGeometry(1,20,14);
+const mat=new THREE.MeshStandardMaterial({roughness:0.35,metalness:0.05});
+const mesh=new THREE.InstancedMesh(geo,mat,N);
+mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+mesh.castShadow=true;mesh.receiveShadow=true;scene.add(mesh);
+const px=new Float32Array(N),py=new Float32Array(N),pz=new Float32Array(N);
+const vx=new Float32Array(N),vy=new Float32Array(N),vz=new Float32Array(N);
+const rad=new Float32Array(N),invM=new Float32Array(N);
+const dummy=new THREE.Object3D();const col=new THREE.Color();
+for(let i=0;i<N;i++){
+rad[i]=0.25+Math.random()*0.4;
+invM[i]=1/Math.pow(rad[i],3);
+px[i]=(Math.random()*2-1)*4;py[i]=8+Math.random()*22;pz[i]=(Math.random()*2-1)*4;
+col.setHSL(Math.random(),0.75,0.55);
+mesh.setColorAt(i,col);
 }
-for(const sx of [-1,1]) for(const sz of [-1,1])
-  addBar(0.14,BOX.height,0.14,sx*BOX.hx,BOX.height/2,sz*BOX.hz);
-addBar(BOX.hx*2+0.14,0.14,0.14,0,BOX.height, BOX.hz);
-addBar(BOX.hx*2+0.14,0.14,0.14,0,BOX.height,-BOX.hz);
-addBar(0.14,0.14,BOX.hz*2+0.14, BOX.hx,BOX.height,0);
-addBar(0.14,0.14,BOX.hz*2+0.14,-BOX.hx,BOX.height,0);
-addBar(BOX.hx*2+0.14,0.14,0.14,0,0.05, BOX.hz);
-addBar(BOX.hx*2+0.14,0.14,0.14,0,0.05,-BOX.hz);
-addBar(0.14,0.14,BOX.hz*2+0.14, BOX.hx,0.05,0);
-addBar(0.14,0.14,BOX.hz*2+0.14,-BOX.hx,0.05,0);
-
-// Sfere: un solo InstancedMesh, raggio codificato nella scala
-const sphereGeo = new THREE.SphereGeometry(1,20,14);
-const sphereMat = new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.34,metalness:0.05});
-const spheres = new THREE.InstancedMesh(sphereGeo,sphereMat,MAX);
-spheres.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-spheres.castShadow = true;
-spheres.receiveShadow = true;
-spheres.frustumCulled = false;
-scene.add(spheres);
-
-const rand = (a,b)=>a+Math.random()*(b-a);
-const bodies = [];
-const tmpColor = new THREE.Color();
-for(let i=0;i<MAX;i++){
-  const r = rand(0.28,0.62);
-  bodies.push({
-    p:new THREE.Vector3(), v:new THREE.Vector3(),
-    r, m:r*r*r, inv:1/(r*r*r)
-  });
-  tmpColor.setHSL(Math.random(),0.72,rand(0.48,0.62));
-  spheres.setColorAt(i,tmpColor);
+mesh.instanceColor.needsUpdate=true;
+let spawnIdx=0,spawnT=0,simT=0,nextShake=4,shakeT=99,ox=0,oz=0;
+const stEl=document.getElementById('st');
+function doShake(){
+shakeT=0;nextShake=simT+5+Math.random()*3;
+for(let i=0;i<N;i++){vx[i]+=(Math.random()-0.5)*7;vz[i]+=(Math.random()-0.5)*7;vy[i]+=Math.random()*5;}
 }
-if(spheres.instanceColor) spheres.instanceColor.needsUpdate = true;
-
-function spawn(i,high){
-  const b = bodies[i];
-  b.p.set(rand(-BOX.hx+b.r+0.3,BOX.hx-b.r-0.3), high?rand(9,14):rand(8,15), rand(-BOX.hz+b.r+0.3,BOX.hz-b.r-0.3));
-  b.v.set(rand(-0.6,0.6),rand(-1.5,0),rand(-0.6,0.6));
+function step(h){
+for(let i=0;i<N;i++){vy[i]+=GRAV*h;vx[i]*=0.999;vy[i]*=0.9995;vz[i]*=0.999;px[i]+=vx[i]*h;py[i]+=vy[i]*h;pz[i]+=vz[i]*h;}
+for(let i=0;i<N;i++){
+const r=rad[i];
+if(py[i]<r){py[i]=r;if(vy[i]<0)vy[i]=-vy[i]*E_FLOOR;vx[i]*=0.94;vz[i]*=0.94;if(Math.abs(vy[i])<0.4)vy[i]=0;}
+const x0=-H+r+ox,x1=H-r+ox,z0=-H+r+oz,z1=H-r+oz;
+if(px[i]<x0){px[i]=x0;if(vx[i]<0)vx[i]=-vx[i]*E_WALL;vy[i]*=0.95;vz[i]*=0.95;}
+else if(px[i]>x1){px[i]=x1;if(vx[i]>0)vx[i]=-vx[i]*E_WALL;vy[i]*=0.95;vz[i]*=0.95;}
+if(pz[i]<z0){pz[i]=z0;if(vz[i]<0)vz[i]=-vz[i]*E_WALL;vx[i]*=0.95;vy[i]*=0.95;}
+else if(pz[i]>z1){pz[i]=z1;if(vz[i]>0)vz[i]=-vz[i]*E_WALL;vx[i]*=0.95;vy[i]*=0.95;}
 }
-let active = 70;
-for(let i=0;i<active;i++) spawn(i,false);
-let spawnTimer = 0;
-
-// Fisica fatta a mano: gravita', urti sfera-sfera, pareti con restituzione e attrito
-const GRAV = -22, REST_FLOOR = 0.42, REST_WALL = 0.52, REST_SPHERE = 0.32;
-let boxOX = 0, boxOZ = 0, shakeAmp = 0;
-
-function stepPhysics(dt,t){
-  const drag = Math.exp(-0.12*dt);
-  const shakeAX = shakeAmp * Math.sin(t*34) * 26;
-  const shakeAZ = shakeAmp * Math.cos(t*29) * 22;
-  for(let i=0;i<active;i++){
-    const b = bodies[i];
-    b.v.y += GRAV*dt;
-    b.v.x += shakeAX*dt; b.v.z += shakeAZ*dt;
-    b.v.multiplyScalar(drag);
-    b.p.addScaledVector(b.v,dt);
-  }
-  // Urti sfera-sfera: correzione posizionale + impulso con attrito tangenziale
-  for(let iter=0;iter<2;iter++){
-    for(let i=0;i<active;i++){
-      const a = bodies[i];
-      for(let j=i+1;j<active;j++){
-        const b = bodies[j];
-        const dx=b.p.x-a.p.x, dy=b.p.y-a.p.y, dz=b.p.z-a.p.z;
-        const minD=a.r+b.r, d2=dx*dx+dy*dy+dz*dz;
-        if(d2>=minD*minD || d2===0) continue;
-        const d=Math.sqrt(d2), nx=dx/d, ny=dy/d, nz=dz/d, pen=minD-d;
-        const invSum=a.inv+b.inv, corr=pen/invSum*0.9;
-        a.p.x-=nx*corr*a.inv; a.p.y-=ny*corr*a.inv; a.p.z-=nz*corr*a.inv;
-        b.p.x+=nx*corr*b.inv; b.p.y+=ny*corr*b.inv; b.p.z+=nz*corr*b.inv;
-        const rvx=b.v.x-a.v.x, rvy=b.v.y-a.v.y, rvz=b.v.z-a.v.z;
-        const vn=rvx*nx+rvy*ny+rvz*nz;
-        if(vn<0){
-          const jimp=-(1+REST_SPHERE)*vn/invSum;
-          a.v.x-=jimp*nx*a.inv; a.v.y-=jimp*ny*a.inv; a.v.z-=jimp*nz*a.inv;
-          b.v.x+=jimp*nx*b.inv; b.v.y+=jimp*ny*b.inv; b.v.z+=jimp*nz*b.inv;
-          // attrito: smorza la velocita' relativa tangenziale
-          const tx=rvx-vn*nx, ty=rvy-vn*ny, tz=rvz-vn*nz, f=0.12/invSum;
-          a.v.x+=tx*f*a.inv; a.v.y+=ty*f*a.inv; a.v.z+=tz*f*a.inv;
-          b.v.x-=tx*f*b.inv; b.v.y-=ty*f*b.inv; b.v.z-=tz*f*b.inv;
-        }
-      }
-    }
-  }
-  // Pareti e pavimento (limiti spostati con la scatola durante lo shake)
-  for(let i=0;i<active;i++){
-    const b=bodies[i], r=b.r;
-    if(b.p.y<r){
-      b.p.y=r;
-      if(b.v.y<0) b.v.y=-b.v.y*REST_FLOOR;
-      if(Math.abs(b.v.y)<0.35) b.v.y=0;
-      b.v.x*=0.88; b.v.z*=0.88; // attrito col pavimento
-    }
-    const minX=boxOX-BOX.hx+r, maxX=boxOX+BOX.hx-r;
-    const minZ=boxOZ-BOX.hz+r, maxZ=boxOZ+BOX.hz-r;
-    if(b.p.x<minX){ b.p.x=minX; if(b.v.x<0)b.v.x=-b.v.x*REST_WALL; b.v.y*=0.94; b.v.z*=0.94; }
-    else if(b.p.x>maxX){ b.p.x=maxX; if(b.v.x>0)b.v.x=-b.v.x*REST_WALL; b.v.y*=0.94; b.v.z*=0.94; }
-    if(b.p.z<minZ){ b.p.z=minZ; if(b.v.z<0)b.v.z=-b.v.z*REST_WALL; b.v.y*=0.94; b.v.x*=0.94; }
-    else if(b.p.z>maxZ){ b.p.z=maxZ; if(b.v.z>0)b.v.z=-b.v.z*REST_WALL; b.v.y*=0.94; b.v.x*=0.94; }
-    // smorzamento dei micro-movimenti a riposo nel mucchio
-    if(b.p.y<r+0.02 && b.v.lengthSq()<0.004) b.v.set(0,0,0);
-  }
+for(let i=0;i<N;i++){
+for(let j=i+1;j<N;j++){
+const dx=px[j]-px[i],dy=py[j]-py[i],dz=pz[j]-pz[i];
+const rs=rad[i]+rad[j],d2=dx*dx+dy*dy+dz*dz;
+if(d2<rs*rs&&d2>1e-9){
+const d=Math.sqrt(d2),nx=dx/d,ny=dy/d,nz=dz/d,ov=rs-d;
+const w1=invM[i],w2=invM[j],ws=w1+w2;
+px[i]-=nx*ov*(w1/ws);py[i]-=ny*ov*(w1/ws);pz[i]-=nz*ov*(w1/ws);
+px[j]+=nx*ov*(w2/ws);py[j]+=ny*ov*(w2/ws);pz[j]+=nz*ov*(w2/ws);
+const rvx=vx[j]-vx[i],rvy=vy[j]-vy[i],rvz=vz[j]-vz[i];
+const vn=rvx*nx+rvy*ny+rvz*nz;
+if(vn<0){
+const jj=-(1+E_BALL)*vn/ws;
+vx[i]-=jj*w1*nx;vy[i]-=jj*w1*ny;vz[i]-=jj*w1*nz;
+vx[j]+=jj*w2*nx;vy[j]+=jj*w2*ny;vz[j]+=jj*w2*nz;
+const tx=rvx-vn*nx,ty=rvy-vn*ny,tz=rvz-vn*nz;
+vx[i]+=tx*0.02;vy[i]+=ty*0.02;vz[i]+=tz*0.02;
+vx[j]-=tx*0.02;vy[j]-=ty*0.02;vz[j]-=tz*0.02;
 }
-
-const dummy = new THREE.Object3D();
-const clock = new THREE.Clock();
-let elapsed = 0, wasShaking = false;
-
-renderer.setAnimationLoop(()=>{
-  const dt = Math.min(clock.getDelta(),0.033);
-  elapsed += dt;
-
-  // Caduta continua finche' non sono attive tutte le 200 sfere
-  if(active<MAX){
-    spawnTimer += dt;
-    while(spawnTimer>0.055 && active<MAX){ spawn(active,true); active++; spawnTimer-=0.055; }
-  }
-
-  // Shake periodico: 1.4s ogni 7s, con impulso iniziale al mucchio
-  const phase = elapsed % 7;
-  const shaking = phase < 1.4;
-  shakeAmp = shaking ? Math.sin((phase/1.4)*Math.PI) : 0;
-  if(shaking && !wasShaking){
-    for(let i=0;i<active;i++){
-      const b=bodies[i];
-      b.v.x += rand(-2.2,2.2); b.v.z += rand(-2.2,2.2);
-      if(b.p.y<2.2) b.v.y += rand(1.5,4.5);
-    }
-  }
-  wasShaking = shaking;
-  boxOX = Math.sin(elapsed*34)*0.22*shakeAmp;
-  boxOZ = Math.cos(elapsed*27)*0.18*shakeAmp;
-  boxGroup.position.set(boxOX,Math.abs(Math.sin(elapsed*17))*0.05*shakeAmp,boxOZ);
-  boxGroup.rotation.z = Math.sin(elapsed*23)*0.008*shakeAmp;
-  boxGroup.rotation.x = Math.cos(elapsed*19)*0.008*shakeAmp;
-
-  const sub=3, sdt=dt/sub;
-  for(let s=0;s<sub;s++) stepPhysics(sdt,elapsed);
-
-  spheres.count = active;
-  for(let i=0;i<active;i++){
-    const b=bodies[i];
-    dummy.position.copy(b.p);
-    dummy.scale.setScalar(b.r);
-    dummy.rotation.set(0,0,0);
-    dummy.updateMatrix();
-    spheres.setMatrixAt(i,dummy.matrix);
-  }
-  spheres.instanceMatrix.needsUpdate = true;
-
-  // Camera in orbita lenta
-  const a = elapsed*0.16;
-  camera.position.set(Math.sin(a)*16.5,10.5+Math.sin(elapsed*0.11)*1.2,Math.cos(a)*16.5);
-  camera.lookAt(0,2.4,0);
-
-  renderer.render(scene,camera);
-});
-
-window.addEventListener('resize',()=>{
-  camera.aspect = window.innerWidth/window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
-  renderer.setSize(window.innerWidth,window.innerHeight);
-});
+}
+}
+}
+}
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+let last=performance.now(),camA=0.6;
+function tick(now){
+requestAnimationFrame(tick);
+let dt=Math.min((now-last)/1000,0.033);last=now;simT+=dt;shakeT+=dt;
+spawnT+=dt;
+if(spawnT>0.12){spawnT=0;const i=spawnIdx;spawnIdx=(spawnIdx+1)%N;
+px[i]=(Math.random()*2-1)*3.5+ox;py[i]=11+Math.random()*4;pz[i]=(Math.random()*2-1)*3.5+oz;
+vx[i]=(Math.random()-0.5)*2;vy[i]=-1;vz[i]=(Math.random()-0.5)*2;}
+if(simT>=nextShake)doShake();
+const sh=shakeT<1.2?(1-shakeT/1.2):0;
+ox=Math.sin(simT*38)*0.35*sh;oz=Math.cos(simT*31)*0.35*sh;
+boxGroup.position.x=ox;boxGroup.position.z=oz;
+stEl.textContent=sh>0.02?'SHAKE!':'in '+(nextShake-simT).toFixed(1)+'s';
+const sub=2,h=dt/sub;
+for(let s=0;s<sub;s++)step(h);
+for(let i=0;i<N;i++){dummy.position.set(px[i],py[i],pz[i]);dummy.scale.setScalar(rad[i]);dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix);}
+mesh.instanceMatrix.needsUpdate=true;
+camA+=dt*0.18;
+const R=19;camera.position.set(Math.cos(camA)*R,11.5+Math.sin(simT*0.3)*1.2,Math.sin(camA)*R);
+camera.lookAt(0,2.8,0);
+renderer.render(scene,camera);
+}
+requestAnimationFrame(tick);
 </script>
 </body>
 </html>

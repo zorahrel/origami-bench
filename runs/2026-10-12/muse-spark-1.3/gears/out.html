@@ -3,242 +3,159 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Clockwork</title>
+<title>Procedural Clockwork</title>
 <style>
-  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#07090d}
-  canvas{display:block}
-  #label{position:fixed;left:22px;bottom:18px;pointer-events:none;user-select:none;
-    font-family:Georgia,'Times New Roman',serif;color:#d8c58f;letter-spacing:.35em;
-    font-size:13px;text-transform:uppercase;opacity:.85;text-shadow:0 1px 8px #000}
-  #label small{display:block;letter-spacing:.22em;font-size:9px;color:#8f96a8;margin-top:5px}
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0b0e14}
+canvas{display:block;width:100%;height:100%}
+#v{position:fixed;left:12px;bottom:10px;color:#8fa0b8;font:12px/1.4 system-ui,sans-serif;opacity:.7;pointer-events:none;letter-spacing:.04em}
 </style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
 </head>
 <body>
-<div id="label">Clockwork<small>eleven gears &middot; escapement &middot; pendulum</small></div>
+<div id="v">CLOCKWORK · 8 GEARS · PENDULUM · TICK</div>
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
-
-const renderer = new THREE.WebGLRenderer({ antialias:true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-document.body.appendChild(renderer.domElement);
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x07090d);
-const camera = new THREE.PerspectiveCamera(42, window.innerWidth/window.innerHeight, 0.1, 100);
-let baseDist = 12.5;
-
-/* ---- fake studio environment (canvas equirect -> PMREM) ---- */
-{
-  const c = document.createElement('canvas'); c.width = 1024; c.height = 512;
-  const g = c.getContext('2d');
-  const grad = g.createLinearGradient(0,0,0,512);
-  grad.addColorStop(0,'#3a4666'); grad.addColorStop(0.45,'#141926'); grad.addColorStop(1,'#05070a');
-  g.fillStyle = grad; g.fillRect(0,0,1024,512);
-  const box = (x,y,w,h,col)=>{ g.fillStyle = col; g.fillRect(x,y,w,h); };
-  box(80,60,220,130,'#ffffff');  box(430,40,140,200,'#ffe2b0');
-  box(700,80,260,90,'#bcd2ff');  box(200,300,500,26,'#ff9a3c');
-  box(760,320,180,60,'#7fa8ff'); box(40,330,120,50,'#ffd9a0');
-  const tex = new THREE.CanvasTexture(c);
-  tex.mapping = THREE.EquirectangularReflectionMapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromEquirectangular(tex).texture;
-  tex.dispose(); pmrem.dispose();
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x0b0e14);
+scene.fog=new THREE.Fog(0x0b0e14,16,34);
+function makeEnv(){
+  const c=document.createElement('canvas');c.width=256;c.height=128;
+  const g=c.getContext('2d');
+  const gr=g.createLinearGradient(0,0,0,128);
+  gr.addColorStop(0,'#3a4a63');gr.addColorStop(0.45,'#141a26');gr.addColorStop(0.55,'#0b0d13');gr.addColorStop(1,'#05060a');
+  g.fillStyle=gr;g.fillRect(0,0,256,128);
+  g.fillStyle='rgba(255,240,210,0.95)';g.fillRect(20,18,52,22);g.fillRect(185,16,48,20);
+  g.fillStyle='rgba(150,200,255,0.7)';g.fillRect(95,22,60,14);g.fillRect(30,80,180,10);
+  g.fillStyle='rgba(255,255,255,0.9)';g.fillRect(110,86,36,5);
+  const t=new THREE.CanvasTexture(c);
+  t.mapping=THREE.EquirectangularReflectionMapping;
+  t.colorSpace=THREE.SRGBColorSpace;
+  return t;
 }
-
-/* ---- lights ---- */
-scene.add(new THREE.HemisphereLight(0x9db4ff, 0x2a1c0d, 0.55));
-scene.add(new THREE.AmbientLight(0x223044, 0.5));
-const key = new THREE.DirectionalLight(0xffe6b8, 2.4); key.position.set(5,8,6); scene.add(key);
-const rim = new THREE.DirectionalLight(0x6fa8ff, 1.4); rim.position.set(-6,3,-5); scene.add(rim);
-const warm = new THREE.PointLight(0xff9a3c, 60, 40, 2); warm.position.set(-4,-3,4); scene.add(warm);
-const cool = new THREE.PointLight(0x7fb2ff, 40, 40, 2); cool.position.set(5,4,3); scene.add(cool);
-
-/* ---- materials ---- */
-function metal(color, rough){ return new THREE.MeshStandardMaterial({ color, metalness:0.92, roughness:rough, envMapIntensity:1.15 }); }
-const mats = [
-  metal(0xc9a44a, 0.30), metal(0xb8bcc4, 0.24), metal(0xb87333, 0.34),
-  metal(0x8c6a3f, 0.40), metal(0x6e7684, 0.30), metal(0xd8b25e, 0.26)
-];
-const darkMetal = metal(0x3a3f4a, 0.5);
-const frameMat  = metal(0x4a3b28, 0.55);
-
-/* ---- procedural gear geometry (tooth 0 centred on angle 0) ---- */
-const MODULE = 0.13;
-function gearGeometry(N){
-  const r = MODULE*N/2;                 // pitch radius
-  const rTip = r + MODULE*0.9, rRoot = r - MODULE*1.05;
-  const p = Math.PI*2/N, s = new THREE.Shape();
-  for(let i=0;i<N;i++){
-    const c = i*p;
-    const pts = [[rRoot,c-0.32*p],[rTip,c-0.15*p],[rTip,c+0.15*p],[rRoot,c+0.32*p]];
-    for(const [rr,a] of pts){
-      const x = Math.cos(a)*rr, y = Math.sin(a)*rr;
-      if(i===0 && a===pts[0][1]) s.moveTo(x,y); else s.lineTo(x,y);
+scene.environment=makeEnv();
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.12;
+document.body.appendChild(renderer.domElement);
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+const camera=new THREE.PerspectiveCamera(42,innerWidth/innerHeight,0.1,100);
+camera.position.set(0,0.6,13.5);
+scene.add(new THREE.HemisphereLight(0xbfd4ff,0x2a1f12,0.55));
+scene.add(new THREE.AmbientLight(0x223044,0.6));
+const key=new THREE.DirectionalLight(0xffe6bd,2.2);key.position.set(5,7,8);scene.add(key);
+const rim=new THREE.DirectionalLight(0x6fb7ff,1.4);rim.position.set(-6,3,-4);scene.add(rim);
+const fill=new THREE.DirectionalLight(0xffffff,0.5);fill.position.set(-4,-5,6);scene.add(fill);
+const warm=new THREE.PointLight(0xff9a3c,18,20,2);warm.position.set(4,-2,3);scene.add(warm);
+const cool=new THREE.PointLight(0x3c8cff,14,20,2);cool.position.set(-4,2,3.5);scene.add(cool);
+const brass=new THREE.MeshStandardMaterial({color:0xc9973f,metalness:0.92,roughness:0.32,envMapIntensity:1.1});
+const brassD=new THREE.MeshStandardMaterial({color:0x9a6f2a,metalness:0.9,roughness:0.42,envMapIntensity:0.9});
+const steel=new THREE.MeshStandardMaterial({color:0xb9c2cf,metalness:0.95,roughness:0.28,envMapIntensity:1.1});
+const darkM=new THREE.MeshStandardMaterial({color:0x3a4150,metalness:0.9,roughness:0.45,envMapIntensity:0.7});
+const plateM=new THREE.MeshStandardMaterial({color:0x1a2230,metalness:0.75,roughness:0.55,envMapIntensity:0.5});
+const redM=new THREE.MeshStandardMaterial({color:0xb3312a,metalness:0.6,roughness:0.4});
+function circlePath(x,y,r){const p=new THREE.Path();p.absarc(x,y,r,0,Math.PI*2,true);return p;}
+function gearGeo(T,mod,th){
+  const rp=mod*T/2, ro=rp+mod*0.85, rr=Math.max(rp-mod*1.0,0.2);
+  const s=new THREE.Shape();const da=Math.PI*2/T;
+  for(let i=0;i<T;i++){
+    const a=i*da;
+    const pts=[[a,rr],[a+da*0.22,rr],[a+da*0.32,ro],[a+da*0.52,ro],[a+da*0.62,rr],[a+da,rr]];
+    for(const [ang,r] of pts){const x=Math.cos(ang)*r,y=Math.sin(ang)*r;if(i===0&&ang===a&&r===rr&&s.curves.length===0&&s.currentPoint===undefined){} }
+    for(let k=0;k<pts.length;k++){
+      const x=Math.cos(pts[k][0])*pts[k][1],y=Math.sin(pts[k][0])*pts[k][1];
+      if(i===0&&k===0)s.moveTo(x,y);else s.lineTo(x,y);
     }
   }
   s.closePath();
-  const hub = new THREE.Path(); hub.absarc(0,0,0.15,0,Math.PI*2,true); s.holes.push(hub);
-  if(r > 1.12){                          // lightening holes on large wheels
-    for(let i=0;i<5;i++){
-      const a = i/5*Math.PI*2, h = new THREE.Path();
-      h.absarc(Math.cos(a)*rRoot*0.55, Math.sin(a)*rRoot*0.55, rRoot*0.20, 0, Math.PI*2, true);
-      s.holes.push(h);
-    }
+  s.holes.push(circlePath(0,0,0.13));
+  if(rp>0.95){
+    const n=rp>1.6?6:5, ring=rp*0.55, hr=Math.min(rp*0.18,ring-0.35,rr-ring-0.12);
+    if(hr>0.12){for(let k=0;k<n;k++){const a=k/n*Math.PI*2;s.holes.push(circlePath(Math.cos(a)*ring,Math.sin(a)*ring,hr));}}
   }
-  const geo = new THREE.ExtrudeGeometry(s, { depth:0.32, bevelEnabled:true, bevelThickness:0.02,
-    bevelSize:0.015, bevelSegments:1, curveSegments:28 });
-  geo.translate(0,0,-0.16);
-  return geo;
+  const g=new THREE.ExtrudeGeometry(s,{depth:th,bevelEnabled:true,bevelThickness:0.02,bevelSize:0.02,bevelSegments:1,curveSegments:5});
+  g.translate(0,0,-th/2);g.computeVertexNormals();return g;
 }
-
-/* ---- gear train: mesh graph with exact ratios & tooth phasing ---- */
-/* spec: N teeth, parent index, mesh angle (deg) OR coax z-layer        */
-const specs = [
-  { N:28, p:-1, x:-3.0, y:-1.5, z:0    },   // root wheel
-  { N:17, p:0,  phi:  30 },
-  { N:22, p:1,  phi:  80 },
-  { N:13, p:2,  coax: 0.65 },               // front pinion on gear 2's axle
-  { N:26, p:3,  phi: -10 },
-  { N:15, p:4,  phi: -60 },
-  { N:20, p:5,  coax: 0    },               // back to main layer on gear 5's axle
-  { N:12, p:6,  phi:-120 },
-  { N:24, p:7,  phi:-155 },
-  { N:14, p:0,  coax:-0.65 },               // rear pinion on root axle
-  { N:18, p:9,  phi: 120 }
-];
-const OX = 0.4, OY = 0.6;                    // centre the layout
-const hubGeo  = new THREE.CylinderGeometry(0.20,0.20,0.55,24); hubGeo.rotateX(Math.PI/2);
-const boltGeo = new THREE.CylinderGeometry(0.11,0.11,0.12,6);  boltGeo.rotateX(Math.PI/2);
-const machine = new THREE.Group(); scene.add(machine);
-const gears = [];
-
-specs.forEach((sp,i)=>{
-  const r = MODULE*sp.N/2;
-  let x,y,z,k,c;
-  if(sp.p < 0){ x=sp.x; y=sp.y; z=sp.z; k=1; c=0; }
-  else{
-    const par = gears[sp.p];
-    if(sp.coax !== undefined){            // rigidly fixed to parent's axle
-      x=par.x; y=par.y; z=sp.coax; k=par.k; c=par.c;
-    }else{                                // meshing neighbour
-      const phi = sp.phi*Math.PI/180, d = r + par.r;
-      x = par.x + Math.cos(phi)*d; y = par.y + Math.sin(phi)*d; z = par.z;
-      const ratio = par.N/sp.N;           // omegaChild = -ratio * omegaParent
-      k = -ratio*par.k;
-      c = -ratio*par.c + phi*(1+ratio) + Math.PI + Math.PI/sp.N;  // tooth-into-gap phase
-    }
-  }
-  const grp = new THREE.Group();
-  grp.position.set(x+OX, y+OY, z);
-  grp.add(new THREE.Mesh(gearGeometry(sp.N), mats[i % mats.length]));
-  const hub = new THREE.Mesh(hubGeo, darkMetal); grp.add(hub);
-  const bolt = new THREE.Mesh(boltGeo, mats[(i+3) % mats.length]); bolt.position.z = 0.30; grp.add(bolt);
-  machine.add(grp);
-  gears.push({ N:sp.N, r, x, y, z, k, c, grp });
-});
-
-/* ---- frame ---- */
-{
-  const mk = (w,h,x,y)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,0.25), frameMat);
-    m.position.set(x,y,-1.25); machine.add(m); };
-  mk(11,0.35,0, 3.95); mk(11,0.35,0,-3.95); mk(0.35,8.25,-5.4,0); mk(0.35,8.25,5.4,0);
-  const screwGeo = new THREE.CylinderGeometry(0.09,0.09,0.1,6); screwGeo.rotateX(Math.PI/2);
-  for(const [x,y] of [[-5.4,3.95],[5.4,3.95],[-5.4,-3.95],[5.4,-3.95]]){
-    const sc = new THREE.Mesh(screwGeo, darkMetal); sc.position.set(x,y,-1.1); machine.add(sc);
-  }
+const teeth=[48,28,36,18,32,22,40,16];
+const mod=0.09, TH=0.5;
+const rp=teeth.map(t=>mod*t/2);
+const dirs=[0,2.1,-0.55,2.55,0.45,2.0,-1.15];
+const pos=[{x:-0.4,y:0.9,z:0}];
+for(let i=1;i<8;i++){
+  const d=rp[i-1]+rp[i]+0.025, a=dirs[i-1], p=pos[i-1];
+  pos.push({x:p.x+Math.cos(a)*d,y:p.y+Math.sin(a)*d,z:(i%2)*0.35});
 }
-
-/* ---- pendulum (2 s period, behind the wheels) ---- */
-const pendulum = new THREE.Group();
-pendulum.position.set(0.2, 3.75, -0.95);
-{
-  const L = 6.2;
-  const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.035,L,10), darkMetal);
-  rod.position.y = -L/2; pendulum.add(rod);
-  const bobGeo = new THREE.CylinderGeometry(0.66,0.66,0.16,44); bobGeo.rotateX(Math.PI/2);
-  const bob = new THREE.Mesh(bobGeo, metal(0xd8b25e,0.22)); bob.position.y = -L; pendulum.add(bob);
-  const rimT = new THREE.Mesh(new THREE.TorusGeometry(0.66,0.045,12,44), metal(0x8c6a3f,0.35));
-  rimT.position.y = -L; pendulum.add(rimT);
-  const anchor = new THREE.Mesh(new THREE.TorusGeometry(0.5,0.055,10,28,Math.PI), darkMetal);
-  anchor.rotation.z = Math.PI; anchor.position.y = 0.05; pendulum.add(anchor);
+const w0=0.35, w=[], base=[0];
+for(let i=0;i<8;i++)w.push(w0*(teeth[0]/teeth[i])*(i%2?-1:1));
+for(let i=1;i<8;i++){
+  const p=pos[i-1],c=pos[i],ang=Math.atan2(c.y-p.y,c.x-p.x);
+  base.push(ang+Math.PI-(Math.PI-teeth[i-1]*(ang-base[i-1]))/teeth[i]);
 }
-machine.add(pendulum);
-
-/* ---- dial with ticking second hand ---- */
-const dial = new THREE.Group(); dial.position.set(-3.55, 2.85, 1.15); machine.add(dial);
-let secHand, minHand, hrHand;
-{
-  const face = new THREE.Mesh(new THREE.CircleGeometry(0.95,48),
-    new THREE.MeshStandardMaterial({ color:0x161a22, metalness:0.4, roughness:0.6, envMapIntensity:0.6 }));
-  dial.add(face);
-  dial.add(new THREE.Mesh(new THREE.TorusGeometry(0.95,0.07,14,64), metal(0xc9a44a,0.28)));
-  const markGeo = new THREE.BoxGeometry(0.045,0.17,0.02);
-  const markMat = metal(0xd8c58f,0.35);
-  for(let i=0;i<12;i++){
-    const a = i/12*Math.PI*2, m = new THREE.Mesh(markGeo, markMat);
-    m.position.set(Math.sin(a)*0.78, Math.cos(a)*0.78, 0.02); m.rotation.z = -a; dial.add(m);
-  }
-  function hand(len,w,mat,z,tail){
-    const g = new THREE.Group(); g.position.z = z;
-    const geo = new THREE.BoxGeometry(w,len+tail,0.025); geo.translate(0,(len-tail)/2,0);
-    g.add(new THREE.Mesh(geo, mat)); dial.add(g); return g;
-  }
-  hrHand  = hand(0.45,0.085,metal(0xd8c58f,0.3),0.06,0.10);
-  minHand = hand(0.68,0.060,metal(0xd8c58f,0.3),0.10,0.12);
-  secHand = hand(0.80,0.028,new THREE.MeshStandardMaterial({ color:0xc23b2a, metalness:0.6, roughness:0.4 }),0.14,0.22);
-  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.075,20,14), metal(0xc9a44a,0.25));
-  cap.position.z = 0.16; dial.add(cap);
-  hrHand.rotation.z = -2.1; minHand.rotation.z = -0.9;
+const gears=[];
+const mats=[brass,steel,brassD,steel,brass,steel,brassD,steel];
+for(let i=0;i<8;i++){
+  const m=new THREE.Mesh(gearGeo(teeth[i],mod,TH),mats[i%8]);
+  m.position.set(pos[i].x,pos[i].y,pos[i].z);
+  m.rotation.z=base[i];scene.add(m);gears.push(m);
+  const hub=new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.2,TH+0.22,20),darkM);
+  hub.rotation.x=Math.PI/2;hub.position.copy(m.position);scene.add(hub);
+  const ax=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.09,2.4,14),darkM);
+  ax.rotation.x=Math.PI/2;ax.position.set(pos[i].x,pos[i].y,0.05);scene.add(ax);
+  const cap=new THREE.Mesh(new THREE.SphereGeometry(0.11,14,10),redM);
+  cap.position.set(pos[i].x,pos[i].y,1.0);scene.add(cap);
 }
-
-/* ---- drifting dust for depth ---- */
-let dust;
-{
-  const n=350, pos=new Float32Array(n*3);
-  for(let i=0;i<n;i++){ pos[i*3]=(Math.random()-0.5)*18; pos[i*3+1]=(Math.random()-0.5)*12; pos[i*3+2]=-3-Math.random()*6; }
-  const g=new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos,3));
-  dust = new THREE.Points(g, new THREE.PointsMaterial({ color:0x8fa3cc, size:0.045, transparent:true, opacity:0.55 }));
-  scene.add(dust);
+const plate=new THREE.Mesh(new THREE.BoxGeometry(13,10,0.3),plateM);
+plate.position.set(0.4,-0.2,-1.05);scene.add(plate);
+const plate2=new THREE.Mesh(new THREE.BoxGeometry(13,10,0.15),new THREE.MeshStandardMaterial({color:0x0e141f,metalness:0.6,roughness:0.7}));
+plate2.position.set(0.4,-0.2,-1.28);scene.add(plate2);
+for(const [sx,sy] of [[-5.6,3.9],[6.4,3.9],[-5.6,-4.4],[6.4,-4.4]]){
+  const pil=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.16,1.6,12),brassD);
+  pil.rotation.x=Math.PI/2;pil.position.set(sx,sy,-0.25);scene.add(pil);
 }
-
-/* ---- animation ---- */
-const easeOutBack = x => { const s=1.9; return 1 + (s+1)*Math.pow(x-1,3) + s*Math.pow(x-1,2); };
-const clock = new THREE.Clock();
-
-function onResize(){
-  camera.aspect = window.innerWidth/window.innerHeight;
-  baseDist = camera.aspect < 1.2 ? Math.min(24, 12.5*Math.pow(1.2/camera.aspect,0.8)) : 12.5;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+// pendulum
+const pend=new THREE.Group();pend.position.set(-3.6,3.4,0.55);scene.add(pend);
+const rod=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,4.8,10),steel);
+rod.position.y=-2.4;pend.add(rod);
+const anchor=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.16,0.3,14),brass);
+anchor.rotation.x=Math.PI/2;pend.add(anchor);
+const bob=new THREE.Mesh(new THREE.CylinderGeometry(0.62,0.62,0.18,32),brass);
+bob.rotation.x=Math.PI/2;bob.position.y=-4.8;pend.add(bob);
+const bobIn=new THREE.Mesh(new THREE.CylinderGeometry(0.42,0.42,0.2,32),redM);
+bobIn.rotation.x=Math.PI/2;bobIn.position.y=-4.8;pend.add(bobIn);
+// second-hand dial (ticking)
+const dialC=new THREE.Vector3(3.6,-2.7,0.9);
+const face=new THREE.Mesh(new THREE.CylinderGeometry(1.05,1.05,0.12,40),new THREE.MeshStandardMaterial({color:0xf0e6cf,metalness:0.2,roughness:0.5}));
+face.rotation.x=Math.PI/2;face.position.copy(dialC);scene.add(face);
+const bez=new THREE.Mesh(new THREE.TorusGeometry(1.05,0.09,12,48),brass);
+bez.position.copy(dialC);scene.add(bez);
+for(let i=0;i<12;i++){
+  const a=i/12*Math.PI*2;
+  const tick=new THREE.Mesh(new THREE.BoxGeometry(i%3===0?0.09:0.04,i%3===0?0.22:0.12,0.02),new THREE.MeshStandardMaterial({color:0x1a1a1a}));
+  tick.position.set(dialC.x+Math.cos(a)*0.86,dialC.y+Math.sin(a)*0.86,dialC.z+0.07);
+  tick.rotation.z=a+Math.PI/2;scene.add(tick);
 }
-window.addEventListener('resize', onResize); onResize();
-
-renderer.setAnimationLoop(()=>{
-  const t = clock.getElapsedTime();
-  const T = t*0.55;                                   // master angle
-  for(const g of gears) g.grp.rotation.z = g.k*T + g.c;
-
-  pendulum.rotation.z = 0.38*Math.sin(Math.PI*t);     // 2 s period
-
-  const whole = Math.floor(t), frac = t-whole;        // tick each second
-  const step = easeOutBack(Math.min(frac/0.16, 1));
-  secHand.rotation.z = -(whole+step)*Math.PI/30;
-  minHand.rotation.z = -0.9 - t*Math.PI/1800;
-  hrHand.rotation.z  = -2.1 - t*Math.PI/21600;
-
-  dust.rotation.z = t*0.005;
-  machine.rotation.y = Math.sin(t*0.10)*0.045;
-  machine.rotation.x = Math.sin(t*0.07+1.3)*0.02;
-
-  camera.position.set(Math.sin(t*0.13)*0.85, 0.35+Math.sin(t*0.09)*0.45, baseDist + Math.sin(t*0.06)*0.55);
-  camera.lookAt(0,0,0);
-  renderer.render(scene, camera);
-});
+const hand=new THREE.Group();hand.position.set(dialC.x,dialC.y,dialC.z+0.14);scene.add(hand);
+const needle=new THREE.Mesh(new THREE.BoxGeometry(0.05,0.92,0.02),redM);needle.position.y=0.32;hand.add(needle);
+const tail=new THREE.Mesh(new THREE.BoxGeometry(0.07,0.28,0.02),redM);tail.position.y=-0.2;hand.add(tail);
+const pin=new THREE.Mesh(new THREE.SphereGeometry(0.07,12,10),darkM);pin.position.z=0.02;hand.add(pin);
+function easeOutBack(x){const c=1.70158;return 1+(c+1)*Math.pow(x-1,3)+c*Math.pow(x-1,2);}
+const clock=new THREE.Clock();
+function tick(){
+  requestAnimationFrame(tick);
+  const e=clock.getElapsedTime();
+  for(let i=0;i<8;i++)gears[i].rotation.z=base[i]+w[i]*e;
+  pend.rotation.z=0.32*Math.sin(Math.PI*e);
+  const s=Math.floor(e),f=e-s;
+  const k=f<0.22?easeOutBack(f/0.22):1;
+  hand.rotation.z=-((s+k)/60)*Math.PI*2+Math.PI/2*0+Math.PI/2;
+  // subtle camera drift
+  camera.position.set(Math.sin(e*0.11)*1.1,0.6+Math.sin(e*0.13)*0.7,13.5+Math.sin(e*0.07)*0.9);
+  camera.lookAt(0.3,-0.3,0);
+  warm.intensity=18+Math.sin(e*2.1)*2;
+  renderer.render(scene,camera);
+}
+tick();
 </script>
 </body>
 </html>

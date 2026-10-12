@@ -12,7 +12,7 @@ No humans voting, no leaderboard to overfit to: four prompts you can read in a m
 | **Clockwork machine** | **Raymarched SDF** |
 | ![gears](docs/gears.gif) | ![shader](docs/shader.gif) |
 
-*Best-scoring output per task from the first run (walker, gears, shader: Sonnet 5.5; physics: Muse Spark 1.3).*
+*Best-scoring output per task (all four: Sonnet 5.5).
 
 ## Why few tokens?
 
@@ -25,10 +25,11 @@ Mean over 4 tasks. Score = video-judge rating 1-10 (fixed rubric, capped at 4 if
 | # | model | score | time (4 tasks) | output tokens | animated | clean |
 |---|---|---|---|---|---|---|
 | 1 | Claude Sonnet 5.5 | **7.2** | 163 s | 22,913\* | 4/4 | 4/4 |
-| 2 | Muse Spark 1.3 | **7.2** | 478 s | ~9,636† | 4/4 | 4/4 |
-| 3 | Claude Opus 5.5 | 7.0 | 262 s | 26,983\* | 4/4 | 4/4 |
-| 4 | gpt-6-luna | 6.0 | 1030 s | 59,987\* | 3/4 | 4/4 |
-| 5 | free-auto (free router) | 4.0 | 757 s | 15,062 | 3/4 | 3/4 |
+| 2 | Claude Opus 5.5 | 7.0 | 262 s | 26,983\* | 4/4 | 4/4 |
+| 3 | Muse Spark 1.3 | 6.5 | 252 s | ~8,155† | 4/4 | 4/4 |
+| 4 | Muse Wonder Full 1.0 | 6.2 | 258 s | ~8,929† | 4/4 | 4/4 |
+| 5 | gpt-6-luna | 6.0 | 1030 s | 59,987\* | 3/4 | 4/4 |
+| 6 | free-auto (free router) | 4.0 | 757 s | 15,062 | 3/4 | 3/4 |
 
 \* Counts include hidden reasoning tokens, which is why some cells are flagged "over budget" in the report even though every HTML file is under 16 KB. The budget in the prompt is a *request*; the harness reports the overshoot but does not discard the cell.
 † Estimated from characters (chars / 3.5) because that CLI does not expose usage.
