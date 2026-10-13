@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rube Goldberg · Chain Reaction</title>
+<style>
+  :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  * { box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #101923; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #hud { position: fixed; inset: 0; pointer-events: none; color: #edf2e8; }
+  #title { position: absolute; top: 22px; left: 24px; text-shadow: 0 2px 12px #000; }
+  #title strong { display: block; font-size: 13px; letter-spacing: .24em; color: #f2bd69; }
+  #title span { display: block; margin-top: 7px; font-size: 10px; letter-spacing: .15em; color: #9aabb6; }
+  #stages { position: absolute; top: 20px; right: 24px; display: flex; gap: 7px; }
+  .stage { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #56636d; border-radius: 50%; color: #a4b0b6; background: #14212dbb; font-size: 12px; transition: .25s ease; }
+  .stage.active { color: #111920; border-color: #ffd17c; background: #ffd17c; box-shadow: 0 0 18px #ffbd5c99; transform: scale(1.12); }
+  #caption { position: absolute; left: 24px; bottom: 23px; color: #b8c4c9; font-size: 10px; letter-spacing: .12em; text-shadow: 0 1px 8px #000; }
+  #caption b { color: #f2bd69; font-weight: 600; }
+  @media (max-width: 600px) {
+    #title { top: 14px; left: 14px; }
+    #stages { top: 58px; left: 14px; right: auto; gap: 5px; }
+    .stage { width: 29px; height: 29px; }
+    #caption { left: 14px; bottom: 14px; }
+  }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div id="title"><strong>RUBE // GOLDBERG</strong><span>ONE LOOP · 15 SECONDS · NO BRAKES</span></div>
+  <div id="stages" aria-label="Chain reaction stages">
+    <div class="stage active">1</div><div class="stage">2</div><div class="stage">3</div>
+    <div class="stage">4</div><div class="stage">5</div><div class="stage">6</div><div class="stage">7</div>
+  </div>
+  <div id="caption"><b>CHAIN REACTION</b> &nbsp; S-CURVE → SPLIT → FUNNEL → FINALE</div>
+</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const LOOP = 15;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x101923);
+scene.fog = new THREE.Fog(0x101923, 22, 52);
+
+const camera = new THREE.PerspectiveCamera(43, innerWidth / innerHeight, 0.1, 100);
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.8));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xb9d9e5, 0x29313a, 1.7));
+const keyLight = new THREE.DirectionalLight(0xffe5bd, 3.2);
+keyLight.position.set(-6, 13, 9);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(2048, 2048);
+keyLight.shadow.camera.left = -20;
+keyLight.shadow.camera.right = 20;
+keyLight.shadow.camera.top = 18;
+keyLight.shadow.camera.bottom = -18;
+scene.add(keyLight);
+const rimLight = new THREE.PointLight(0x42a9c5, 24, 22, 2);
+rimLight.position.set(3.5, 6.5, -4);
+scene.add(rimLight);
+
+const mat = (color, roughness = 0.65, metalness = 0) =>
+  new THREE.MeshStandardMaterial({ color, roughness, metalness });
+const floorMat = mat(0x25313a, 0.88);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(70, 44), floorMat);
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = -0.045;
+floor.receiveShadow = true;
+scene.add(floor);
+
+const grid = new THREE.GridHelper(54, 54, 0x495863, 0x35424c);
+grid.position.y = -0.025;
+grid.material.transparent = true;
+grid.material.opacity = 0.28;
+scene.add(grid);
+
+function addBox(parent, size, material, position) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
+  mesh.position.set(...position);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+function addCylinder(parent, radiusTop, radiusBottom, height, material, position, segments = 16) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radiusTop, radiusBottom, height, segments), material);
+  mesh.position.set(...position);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+function addTube(points, color, radius = 0.018, opacity = 0.65) {
+  const curve = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(p[0], p[1], p[2])));
+  const mesh = new THREE.Mesh(
+    new THREE.TubeGeometry(curve, Math.max(32, points.length * 8), radius, 6, false),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.42, metalness: 0.5, transparent: true, opacity })
+  );
+  scene.add(mesh);
+  return mesh;
+}
+
+// Brass guide lines make the branching route legible beneath the dominoes.
+const leadPath = [];
+for (let i = 0; i <= 24; i++) {
+  const u = i / 24;
+  leadPath.push([-10 + 3.4 * u, 0.012, 0.42 * Math.sin(2 * Math.PI * u)]);
+}
+addTube(leadPath, 0xd49a52, 0.018, 0.58);
+for (const sign of [-1, 1]) {
+  const path = [];
+  for (let i = 0; i <= 18; i++) {
+    const u = i / 18;
+    path.push([-6.2 + 2.7 * u, 0.014, sign * (0.22 + 0.82 * Math.sin(Math.PI * u))]);
+  }
+  addTube(path, sign > 0 ? 0x52c3b4 : 0xec8a58, 0.017, 0.62);
+}
+addTube([[-2.25, 0.014, 0], [-1.3, 0.014, 0], [-0.35, 0.014, 0], [0.6, 0.014, 0], [1.55, 0.014, 0]], 0xd49a52, 0.018, 0.55);
+
+// Dominoes use a hand-animated hinge at the foot of each piece.
+const dominoes = [];
+const dominoH = 1.04;
+const dominoBody = mat(0x174f63, 0.32, 0.3);
+const dominoStripe = mat(0xeac47b, 0.3, 0.45);
+const axisX = new THREE.Vector3(1, 0, 0);
+function addDomino(position, tangent, fireAt, color = null) {
+  const group = new THREE.Group();
+  group.position.set(position.x, 0.015, position.z);
+  const q = new THREE.Quaternion().setFromUnitVectors(
+    new THREE.Vector3(0, 0, 1),
+    tangent.clone().normalize()
+  );
+  group.quaternion.copy(q);
+  const bodyMaterial = color ? mat(color, 0.3, 0.25) : dominoBody;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.22, dominoH, 0.13), bodyMaterial);
+  body.position.y = dominoH / 2;
+  body.castShadow = true;
+  body.receiveShadow = true;
+  group.add(body);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.035, 0.014), dominoStripe);
+  stripe.position.set(0, dominoH * 0.7, 0.071);
+  group.add(stripe);
+  scene.add(group);
+  dominoes.push({ group, q, fireAt, p: position.clone() });
+}
+function pointsFromFunction(count, fn) {
+  return Array.from({ length: count }, (_, i) => fn(i / (count - 1)));
+}
+const lead = pointsFromFunction(9, u => new THREE.Vector3(-10 + 3.4 * u, 0, 0.42 * Math.sin(2 * Math.PI * u)));
+for (let i = 0; i < lead.length; i++) {
+  const tangent = (lead[Math.min(i + 1, lead.length - 1)].clone().sub(lead[Math.max(0, i - 1)])).normalize();
+  addDomino(lead[i], tangent, i * 0.17, 0x15576a);
+}
+const branchEnds = [];
+for (const sign of [1, -1]) {
+  const branch = pointsFromFunction(7, u =>
+    new THREE.Vector3(-6.2 + 2.7 * u, 0, sign * (0.22 + 0.82 * Math.sin(Math.PI * u)))
+  );
+  const startAt = sign > 0 ? 1.56 : 1.72;
+  for (let i = 0; i < branch.length; i++) {
+    const next = i === branch.length - 1
+      ? new THREE.Vector3(-2.95, 0, 0).sub(branch[i])
+      : branch[i + 1].clone().sub(branch[Math.max(0, i - 1)]);
+    addDomino(branch[i], next.normalize(), startAt + i * 0.17, sign > 0 ? 0x14796f : 0x9c5138);
+  }
+  branchEnds.push(branch[branch.length - 1]);
+}
+
+// The wide bridge is one shared domino, struck by both arms of the split.
+const bridge = new THREE.Group();
+bridge.position.set(-2.95, 0.015, 0);
+const bridgeBody = new THREE.Mesh(new THREE.BoxGeometry(0.2, dominoH, 1.5), mat(0xd08a45, 0.32, 0.35));
+bridgeBody.position.y = dominoH / 2;
+bridgeBody.castShadow = true;
+bridgeBody.receiveShadow = true;
+bridge.add(bridgeBody);
+addBox(bridge, [0.19, 0.035, 1.18], dominoStripe, [0.105, dominoH * 0.72, 0]);
+scene.add(bridge);
+
+const post = pointsFromFunction(10, u => new THREE.Vector3(-2.25 + 3.78 * u, 0, 0));
+for (let i = 0; i < post.length; i++) {
+  addDomino(post[i], new THREE.Vector3(1, 0, 0), 3.26 + i * 0.17, 0x15576a);
+}
+const bridgeFire = 2.93;
+const marbleLaunch = 3.26 + 9 * 0.17 + 0.13;
+
+// Funnel tower: three open, spun-metal bowls around a light frame.
+const towerX = 3.8;
+const bowlMat = mat(0x8b633e, 0.3, 0.72);
+const bowlInner = mat(0xb4814b, 0.29, 0.62);
+function makeFunnel(baseY, radius = 1.08, rise = 0.82) {
+  const profile = [
+    new THREE.Vector2(0.12, 0.09),
+    new THREE.Vector2(0.15, 0.14),
+    new THREE.Vector2(radius * 0.94, rise * 0.91),
+    new THREE.Vector2(radius, rise),
+    new THREE.Vector2(radius * 0.96, rise - 0.09),
+    new THREE.Vector2(0.23, 0.18),
+    new THREE.Vector2(0.12, 0.16)
+  ];
+  const mesh = new THREE.Mesh(new THREE.LatheGeometry(profile, 48), bowlMat);
+  mesh.position.set(towerX, baseY, 0);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.035, 9, 56), bowlInner);
+  rim.rotation.x = Math.PI / 2;
+  rim.position.set(towerX, baseY + rise, 0);
+  rim.castShadow = true;
+  scene.add(rim);
+}
+const bowlBases = [1.43, 0.82, 0.21];
+for (const y of bowlBases) makeFunnel(y);
+for (const sx of [-0.77, 0.77]) {
+  for (const sz of [-0.77, 0.77]) {
+    const leg = addCylinder(scene, 0.045, 0.065, 2.72, mat(0x51626b, 0.42, 0.78), [towerX + sx, 1.36, sz], 10);
+  }
+}
+const towerHub = addCylinder(scene, 0.09, 0.13, 2.72, mat(0x37515c, 0.4, 0.8), [towerX, 1.36, 0], 12);
+towerHub.material.transparent = true;
+towerHub.material.opacity = 0.42;
+for (const y of [0.04, 1.0, 1.62]) {
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.17, 0.025, 8, 64), mat(0x54717a, 0.5, 0.7));
+  ring.rotation.x = Math.PI / 2;
+  ring.position.set(towerX, y, 0);
+  scene.add(ring);
+}
+
+// Entry domino sends the marble up onto the first bowl; its descent is a visible spiral.
+const marble = new THREE.Mesh(new THREE.SphereGeometry(0.19, 24, 18), mat(0xece8d7, 0.17, 0.22));
+marble.castShadow = true;
+marble.receiveShadow = true;
+scene.add(marble);
+function smooth(x) {
+  x = THREE.MathUtils.clamp(x, 0, 1);
+  return x * x * (3 - 2 * x);
+}
+function mix(a, b, t) { return a + (b - a) * t; }
+const spiralStart = marbleLaunch + 0.48;
+const spiralDuration = 2.34;
+const exitStart = spiralStart + spiralDuration;
+const sawImpact = exitStart + 0.83;
+
+// Seesaw with a weighted ball at each end.
+const sawX = 6.65;
+const sawY = 0.57;
+const saw = new THREE.Group();
+saw.position.set(sawX, sawY, 0);
+scene.add(saw);
+const plank = addBox(saw, [3.0, 0.17, 0.64], mat(0x536873, 0.35, 0.63), [0, 0, 0]);
+const plankStripe = addBox(saw, [2.55, 0.025, 0.04], mat(0xe2ad5b, 0.28, 0.55), [0, 0.1, 0]);
+const fulcrum = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.62, 4), mat(0x95633a, 0.38, 0.55));
+fulcrum.position.set(0, -0.39, 0);
+fulcrum.rotation.y = Math.PI / 4;
+fulcrum.castShadow = true;
+saw.add(fulcrum);
+const marble2 = new THREE.Mesh(new THREE.SphereGeometry(0.18, 22, 16), mat(0x55b9d2, 0.18, 0.3));
+marble2.castShadow = true;
+scene.add(marble2);
+const halfSaw = 1.32;
+const sawRelease = sawImpact + 0.42;
+const hammerImpact = sawRelease + 0.69;
+
+// Pendulum hammer.
+const pivotX = 9.66;
+const pivotY = 3.9;
+const hammerLength = 3.3;
+const pendulum = new THREE.Group();
+pendulum.position.set(pivotX, pivotY, 0);
+scene.add(pendulum);
+const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.075, hammerLength, 12), mat(0x8a9ba0, 0.28, 0.83));
+rod.position.y = -hammerLength / 2;
+rod.castShadow = true;
+pendulum.add(rod);
+const hammerHead = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.56, 0.58), mat(0x9e7044, 0.25, 0.8));
+hammerHead.position.y = -hammerLength;
+hammerHead.castShadow = true;
+hammerHead.receiveShadow = true;
+pendulum.add(hammerHead);
+const hammerFace = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.36, 0.4), mat(0xe6bd76, 0.2, 0.7));
+hammerFace.position.set(0.37, -hammerLength, 0);
+pendulum.add(hammerFace);
+const pivotCap = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), mat(0xe3b764, 0.25, 0.75));
+pivotCap.position.set(pivotX, pivotY, 0);
+pivotCap.castShadow = true;
+scene.add(pivotCap);
+
+// A stack of crates tumbles into the bucket.
+const blockImpact = hammerImpact + 0.58;
+const crateMat = mat(0x8b5941, 0.62, 0.12);
+const crateAccent = mat(0xd6a767, 0.5, 0.2);
+const crateSpecs = [
+  { x: 11.05, y: 0.29, endX: 11.42, delay: 0 },
+  { x: 11.05, y: 0.87, endX: 11.77, delay: 0.11 },
+  { x: 11.56, y: 0.29, endX: 12.02, delay: 0.22 },
+  { x: 11.56, y: 0.87, endX: 12.28, delay: 0.33 },
+  { x: 12.04, y: 0.29, endX: 12.47, delay: 0.47 }
+];
+const crates = crateSpecs.map((s, i) => {
+  const g = new THREE.Group();
+  const cube = addBox(g, [0.56, 0.56, 0.56], crateMat, [0, 0, 0]);
+  addBox(g, [0.59, 0.045, 0.045], crateAccent, [0, 0.13, 0.286]);
+  g.position.set(s.x, s.y, 0);
+  scene.add(g);
+  return { g, spec: s, i };
+});
+
+// Rope wheel, hanging bucket, flag mast, and a finale lamp.
+const pulleyCenter = new THREE.Vector3(13.43, 3.12, 0);
+const pulley = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.055, 12, 40), mat(0x9f7548, 0.3, 0.8));
+pulley.position.copy(pulleyCenter);
+scene.add(pulley);
+const pulleyHub = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.22, 16), mat(0xe3b764, 0.28, 0.75));
+pulleyHub.position.copy(pulleyCenter);
+pulleyHub.rotation.x = Math.PI / 2;
+scene.add(pulleyHub);
+const pulleyFrame = addBox(scene, [0.12, 1.12, 0.16], mat(0x52616a, 0.4, 0.72), [13.43, 3.76, -0.12]);
+const bucketX = 12.78;
+const bucket = new THREE.Group();
+scene.add(bucket);
+const bucketWall = new THREE.Mesh(new THREE.CylinderGeometry(0.31, 0.23, 0.52, 16, 1, true), mat(0x56828a, 0.28, 0.76));
+bucketWall.position.y = -0.08;
+bucket.add(bucketWall);
+const bucketBottom = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.23, 0.06, 16), mat(0x42636c, 0.32, 0.7));
+bucketBottom.position.y = -0.35;
+bucket.add(bucketBottom);
+const bucketRim = new THREE.Mesh(new THREE.TorusGeometry(0.30, 0.035, 8, 28), mat(0xe0b56b, 0.25, 0.75));
+bucketRim.rotation.x = Math.PI / 2;
+bucketRim.position.y = 0.18;
+bucket.add(bucketRim);
+const bucketLoop = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.028, 8, 24), mat(0x9eb4b7, 0.25, 0.78));
+bucketLoop.rotation.x = Math.PI / 2;
+bucketLoop.position.y = 0.23;
+bucket.add(bucketLoop);
+
+const mastX = 14.28;
+addCylinder(scene, 0.055, 0.075, 3.45, mat(0x879398, 0.35, 0.8), [mastX, 1.72, 0], 12);
+const mastFoot = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.3, 0.18, 16), mat(0x6b4e37, 0.5, 0.42));
+mastFoot.position.set(mastX, 0.09, 0);
+mastFoot.castShadow = true;
+scene.add(mastFoot);
+const flagShape = new THREE.Shape();
+flagShape.moveTo(0, 0);
+flagShape.lineTo(0.92, 0);
+flagShape.lineTo(0.78, 0.52);
+flagShape.lineTo(0, 0.46);
+flagShape.closePath();
+const flag = new THREE.Mesh(new THREE.ShapeGeometry(flagShape), mat(0xc84639, 0.48, 0.08));
+flag.castShadow = true;
+scene.add(flag);
+const flagMark = new THREE.Mesh(new THREE.CircleGeometry(0.095, 16), mat(0xf0ca78, 0.36, 0.25));
+scene.add(flagMark);
+
+const lampX = 15.35;
+const lampStand = addCylinder(scene, 0.065, 0.09, 2.5, mat(0x58666a, 0.35, 0.8), [lampX, 1.25, 0], 12);
+const lampArm = addBox(scene, [0.75, 0.09, 0.1], mat(0x7c6950, 0.32, 0.75), [lampX - 0.25, 2.48, 0]);
+const lampBulbMat = new THREE.MeshStandardMaterial({ color: 0x7b5930, emissive: 0xffb83f, emissiveIntensity: 0, roughness: 0.2, metalness: 0.1 });
+const lampBulb = new THREE.Mesh(new THREE.SphereGeometry(0.22, 20, 16), lampBulbMat);
+lampBulb.position.set(lampX - 0.6, 2.4, 0);
+lampBulb.castShadow = true;
+scene.add(lampBulb);
+const lampGlow = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffc45f, transparent: true, opacity: 0, depthWrite: false }));
+lampGlow.position.copy(lampBulb.position);
+scene.add(lampGlow);
+const finaleLight = new THREE.PointLight(0xffbd56, 0, 9, 1.7);
+finaleLight.position.copy(lampBulb.position);
+scene.add(finaleLight);
+
+// A stage fires only when its mechanism starts moving.
+const stageEls = [...document.querySelectorAll('.stage')];
+const stageTimes = [0, 1.56, bridgeFire, marbleLaunch, sawImpact, hammerImpact, blockImpact + 1.0];
+let shownStage = -1;
+function updateStage(t) {
+  let next = 0;
+  for (let i = 1; i < stageTimes.length; i++) if (t >= stageTimes[i]) next = i;
+  if (next !== shownStage) {
+    shownStage = next;
+    stageEls.forEach((el, i) => el.classList.toggle('active', i === next));
+  }
+}
+
+// Impact puffs are small, short-lived, deterministic bursts.
+const dustGeo = new THREE.SphereGeometry(0.055, 7, 5);
+const dust = [];
+function burst(pos, seed = 1, count = 8) {
+  for (let i = 0; i < count; i++) {
+    const a = i * 2.399 + seed * 1.71;
+    const speed = 0.42 + (i % 4) * 0.16;
+    const material = new THREE.MeshBasicMaterial({ color: i % 3 === 0 ? 0xf3c37c : 0xd7c5a5, transparent: true, opacity: 0.66, depthWrite: false });
+    const mesh = new THREE.Mesh(dustGeo, material);
+    mesh.position.copy(pos);
+    mesh.scale.setScalar(0.55 + (i % 3) * 0.16);
+    scene.add(mesh);
+    dust.push({
+      mesh, material, age: 0, life: 0.45 + (i % 4) * 0.11,
+      v: new THREE.Vector3(Math.cos(a) * speed, 0.45 + (i % 3) * 0.19, Math.sin(a) * speed)
+    });
+  }
+}
+const events = [];
+for (let i = 0; i < dominoes.length; i++) {
+  const d = dominoes[i];
+  if (i < dominoes.length - 1) {
+    const next = dominoes[i + 1];
+    events.push({ time: d.fireAt + 0.12, pos: d.p.clone().lerp(next.p, 0.5).add(new THREE.Vector3(0, 0.28, 0)) });
+  }
+}
+events.push(
+  { time: bridgeFire + 0.24, pos: new THREE.Vector3(-2.95, 0.4, 0) },
+  { time: marbleLaunch, pos: new THREE.Vector3(1.72, 0.24, 0) },
+  { time: sawImpact, pos: new THREE.Vector3(5.3, 0.9, 0) },
+  { time: hammerImpact, pos: new THREE.Vector3(pivotX, 0.85, 0) },
+  { time: blockImpact, pos: new THREE.Vector3(11.2, 0.85, 0) },
+  { time: blockImpact + 0.47 + 0.4, pos: new THREE.Vector3(bucketX - 0.25, 0.58, 0) }
+);
+events.sort((a, b) => a.time - b.time);
+let eventCursor = 0;
+
+function sawAngle(t) {
+  if (t < sawImpact) return 0;
+  if (t < sawRelease) return 0.51 * smooth((t - sawImpact) / (sawRelease - sawImpact));
+  return mix(0.51, 0.22, smooth((t - sawRelease) / 0.55));
+}
+function setBallOnSaw(ball, side, angle) {
+  const lx = side * halfSaw;
+  const ly = 0.18;
+  ball.position.set(
+    sawX + lx * Math.cos(angle) - ly * Math.sin(angle),
+    sawY + lx * Math.sin(angle) + ly * Math.cos(angle) + 0.13,
+    0
+  );
+}
+function setMarblePosition(t) {
+  if (t < marbleLaunch) {
+    marble.position.set(1.76, 0.2, 0);
+  } else if (t < spiralStart) {
+    const u = smooth((t - marbleLaunch) / (spiralStart - marbleLaunch));
+    marble.position.set(
+      mix(1.76, towerX + 0.95, u),
+      mix(0.2, 2.14, u) + 0.42 * Math.sin(Math.PI * u),
+      0
+    );
+  } else if (t < exitStart) {
+    const elapsed = t - spiralStart;
+    const layer = Math.min(2, Math.floor(elapsed / 0.78));
+    const u = THREE.MathUtils.clamp((elapsed - layer * 0.78) / 0.78, 0, 1);
+    const eased = smooth(u);
+    const topY = [2.2, 1.59, 0.98][layer];
+    const bottomY = [1.60, 0.99, 0.39][layer];
+    const radius = mix(0.98, 0.17, eased);
+    const angle = elapsed * Math.PI * 4.4;
+    marble.position.set(
+      towerX + Math.cos(angle) * radius,
+      mix(topY, bottomY, eased),
+      Math.sin(angle) * radius
+    );
+  } else {
+    const u = smooth((t - exitStart) / 0.83);
+    marble.position.set(mix(towerX, sawX - halfSaw, u), mix(0.45, sawY + 0.31, u), 0);
+    if (t >= sawImpact) setBallOnSaw(marble, -1, sawAngle(t));
+  }
+}
+function pendulumAngle(t) {
+  if (t < hammerImpact) return 0;
+  const elapsed = t - hammerImpact;
+  if (elapsed < 0.58) return 0.48 * smooth(elapsed / 0.58);
+  return 0.48 * Math.exp(-0.58 * (elapsed - 0.58)) * Math.cos(2.8 * (elapsed - 0.58));
+}
+function updateCrates(t) {
+  for (const c of crates) {
+    const u = smooth((t - blockImpact - c.spec.delay) / 0.48);
+    c.g.position.set(mix(c.spec.x, c.spec.endX, u), mix(c.spec.y, 0.29, u), 0);
+    c.g.rotation.z = -1.36 * u;
+    c.g.rotation.x = 0.12 * Math.sin(u * Math.PI) * (c.i % 2 ? 1 : -1);
+  }
+}
+const bucketImpact = blockImpact + 0.47 + 0.4;
+function updateBucket(t) {
+  const u = smooth((t - bucketImpact) / 0.62);
+  bucket.position.set(bucketX, mix(0.9, 0.42, u), 0);
+  bucket.rotation.z = 0.72 * u;
+  pulley.rotation.z = 2.6 * u;
+  const flagU = smooth((t - (bucketImpact + 0.22)) / 2.72);
+  const flagY = mix(0.28, 2.72, flagU);
+  flag.position.set(mastX + 0.06, flagY, 0.12);
+  flag.rotation.z = 0.025 * Math.sin(t * 7) * flagU;
+  flagMark.position.set(mastX + 0.43, flagY + 0.25, 0.15);
+  const ropeMaterial = ropeA.material;
+  const bucketAnchor = new THREE.Vector3(-0.2, 0.23, 0).applyEuler(bucket.rotation).add(bucket.position);
+  const leftPulley = new THREE.Vector3(pulleyCenter.x - 0.31, pulleyCenter.y, 0);
+  const rightPulley = new THREE.Vector3(pulleyCenter.x + 0.31, pulleyCenter.y, 0);
+  setSegment(ropeA, bucketAnchor, leftPulley);
+  setSegment(ropeB, rightPulley, new THREE.Vector3(mastX + 0.06, flagY + 0.05, 0));
+  ropeMaterial.opacity = 0.8;
+  const lightU = smooth((t - 14.22) / 0.18);
+  lampBulbMat.emissiveIntensity = 0.08 + 3.4 * lightU;
+  lampBulb.material.color.setHex(lightU > 0.02 ? 0xffd477 : 0x7b5930);
+  lampGlow.material.opacity = 0.58 * lightU;
+  finaleLight.intensity = 34 * lightU;
+}
+function setSegment(mesh, a, b) {
+  const dir = new THREE.Vector3().subVectors(b, a);
+  mesh.position.copy(a).add(b).multiplyScalar(0.5);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+  mesh.scale.y = dir.length();
+}
+function makeRope() {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 1, 8), mat(0xc4a77d, 0.7, 0.2));
+  scene.add(mesh);
+  return mesh;
+}
+const ropeA = makeRope();
+const ropeB = makeRope();
+const cameraKeys = [
+  [0, -8.3], [1.7, -6.0], [3.2, -3.0], [4.9, 1.1],
+  [8.5, 6.2], [9.7, 8.2], [11.5, 10.7], [12.5, 13.4], [15, 13.8]
+];
+function cameraFocusX(t) {
+  let i = 0;
+  while (i < cameraKeys.length - 2 && t > cameraKeys[i + 1][0]) i++;
+  const [ta, xa] = cameraKeys[i];
+  const [tb, xb] = cameraKeys[i + 1];
+  return mix(xa, xb, smooth((t - ta) / (tb - ta)));
+}
+function clearDust() {
+  for (const p of dust) {
+    scene.remove(p.mesh);
+    p.material.dispose();
+  }
+  dust.length = 0;
+}
+function updateDust(dt) {
+  for (let i = dust.length - 1; i >= 0; i--) {
+    const p = dust[i];
+    p.age += dt;
+    const u = p.age / p.life;
+    if (u >= 1) {
+      scene.remove(p.mesh);
+      p.material.dispose();
+      dust.splice(i, 1);
+      continue;
+    }
+    p.v.y -= 0.9 * dt;
+    p.mesh.position.addScaledVector(p.v, dt);
+    p.mesh.scale.multiplyScalar(1 + dt * 0.9);
+    p.material.opacity = 0.66 * (1 - u);
+  }
+}
+
+let startedAt = performance.now();
+let lastT = -1;
+let lastNow = performance.now();
+function animate(now) {
+  requestAnimationFrame(animate);
+  let t = ((now - startedAt) / 1000) % LOOP;
+  const dt = Math.min(0.05, Math.max(0, (now - lastNow) / 1000));
+  lastNow = now;
+  if (t < lastT) {
+    clearDust();
+    eventCursor = 0;
+    shownStage = -1;
+  }
+  while (eventCursor < events.length && events[eventCursor].time <= t) {
+    const e = events[eventCursor++];
+    burst(e.pos, eventCursor);
+  }
+  lastT = t;
+
+  for (const d of dominoes) {
+    const a = Math.PI / 2 * smooth((t - d.fireAt) / 0.24);
+    d.group.quaternion.copy(d.q).multiply(new THREE.Quaternion().setFromAxisAngle(axisX, a));
+  }
+  const bridgeAngle = -Math.PI / 2 * smooth((t - bridgeFire) / 0.28);
+  bridge.rotation.z = bridgeAngle;
+
+  setMarblePosition(t);
+  const angle = sawAngle(t);
+  saw.rotation.z = angle;
+  if (t < sawRelease) setBallOnSaw(marble2, 1, angle);
+  else if (t < hammerImpact) {
+    const u = THREE.MathUtils.clamp((t - sawRelease) / (hammerImpact - sawRelease), 0, 1);
+    const startY = sawY + halfSaw * Math.sin(angle) + 0.31;
+    marble2.position.set(
+      mix(sawX + halfSaw * Math.cos(angle), pivotX, u),
+      mix(startY, 0.86, u) + 1.25 * 4 * u * (1 - u),
+      0
+    );
+  } else {
+    const fall = smooth((t - hammerImpact) / 0.75);
+    marble2.position.set(pivotX + 0.12 * fall, mix(0.86, 0.19, fall), 0);
+  }
+
+  pendulum.rotation.z = pendulumAngle(t);
+  updateCrates(t);
+  updateBucket(t);
+
+  const fx = cameraFocusX(t);
+  const focus = new THREE.Vector3(fx, 1.28, 0);
+  camera.position.lerp(new THREE.Vector3(fx + 0.15, 7.1, 14.8), 0.075);
+  camera.lookAt(focus);
+  updateStage(t);
+  updateDust(dt);
+  renderer.render(scene, camera);
+}
+function resetClock() {
+  startedAt = performance.now();
+  lastNow = startedAt;
+  lastT = -1;
+  eventCursor = 0;
+  shownStage = -1;
+  clearDust();
+}
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+resetClock();
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

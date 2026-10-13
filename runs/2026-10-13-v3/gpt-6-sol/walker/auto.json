@@ -1,0 +1,1 @@
+{"console_errors": ["Unexpected token '**'. Ambiguous unary expression in the left hand side of the exponentiation expression; parentheses must be used to disambiguate the expression."], "n_errors": 1, "std": 8.14, "diffs": [0.0, 0.0, 0.0, 0.0], "not_blank": true, "animated": false}

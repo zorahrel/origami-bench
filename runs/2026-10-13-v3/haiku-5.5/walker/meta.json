@@ -1,0 +1,1 @@
+{"gen_seconds": 3038.1, "in_tokens": 231898, "out_tokens": 512000, "out_tokens_estimated": false, "html_bytes": 0, "error": "API Error: response exceeded the 128000 output token maximum (hidden reasoning at --effort max used it all; no HTML emitted)", "effort": "max", "over_budget": true}

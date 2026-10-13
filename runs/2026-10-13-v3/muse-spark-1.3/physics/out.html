@@ -1,0 +1,150 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#0b1020;font-family:system-ui,sans-serif}canvas{display:block}#hud{position:fixed;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:6px;z-index:5;flex-wrap:wrap;justify-content:center}.st{padding:5px 9px;border-radius:20px;background:rgba(10,16,32,.62);color:#8ea0c2;border:1px solid #2a3a5f;font-size:12px;font-weight:700;transition:all .25s}.st.on{background:#ffd54a;color:#111;border-color:#ffd54a;box-shadow:0 0 14px #ffd54a}#bar{position:fixed;top:0;left:0;height:4px;background:#ffd54a;width:0;z-index:6}#msg{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);color:#dfe8ff;background:rgba(0,0,0,.5);padding:6px 14px;border-radius:12px;font-size:13px;z-index:5;white-space:nowrap}</style></head>
+<body><div id="bar"></div><div id="hud"></div><div id="msg">EXTREME RUBE-GOLDBERG • 15s LOOP</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+const T=15, hud=document.getElementById('hud'), bar=document.getElementById('bar'), msg=document.getElementById('msg');
+const names=['1 Domino','2 Funnel','3 Seesaw','4 Hammer','5 Blocks','6 Pulley','7 Flag+Lamp'];
+const fireTimes=[0,4,6.55,7.8,9,11,14];
+const els=names.map((n,i)=>{const d=document.createElement('div');d.className='st';d.textContent=n;hud.appendChild(d);return d;});
+const R=new THREE.WebGLRenderer({antialias:true});R.setSize(innerWidth,innerHeight);R.shadowMap.enabled=true;document.body.appendChild(R.domElement);
+const S=new THREE.Scene();S.background=new THREE.Color(0x0b1020);S.fog=new THREE.Fog(0x0b1020,25,70);
+const C=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,200);
+addEventListener('resize',()=>{C.aspect=innerWidth/innerHeight;C.updateProjectionMatrix();R.setSize(innerWidth,innerHeight);});
+S.add(new THREE.HemisphereLight(0xbfd4ff,0x30241a,.95));
+const sun=new THREE.DirectionalLight(0xffffff,1.6);sun.position.set(6,14,8);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);S.add(sun);
+const lampLight=new THREE.PointLight(0xffc94d,0,18);lampLight.position.set(11.6,4.4,1.6);S.add(lampLight);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(60,24),new THREE.MeshStandardMaterial({color:0x182238,roughness:.95}));ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;S.add(ground);
+const grid=new THREE.GridHelper(60,30,0x33507a,0x22344f);grid.position.y=.01;S.add(grid);
+function M(c,r=.6,m=.2){return new THREE.MeshStandardMaterial({color:c,roughness:r,metalness:m});}
+function box(w,h,d,c,x,y,z,ry=0){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),M(c));m.position.set(x,y,z);m.rotation.y=ry;m.castShadow=m.receiveShadow=true;S.add(m);return m;}
+// ---- STAGE 1 dominoes S-curve + branch ----
+const domGeo=new THREE.BoxGeometry(.34,1.2,.62);
+const domMatA=M(0xff5252,.5),domMatB=M(0x40c4ff,.5),domMatBr=M(0xffd54a,.45);
+const doms=[];
+function addDom(x,z,ry,ft,mat,bridge=false){const g=bridge?new THREE.BoxGeometry(1.4,.28,.9):domGeo;const m=new THREE.Mesh(g,mat||((doms.length%2)?domMatA:domMatB));m.castShadow=m.receiveShadow=true;if(bridge){m.position.set(x,.14,z);}else{m.position.set(x,.6,z);m.userData={x,z,ry,ft};m.rotation.order='YXZ';m.rotation.y=ry;}S.add(m);if(!bridge)doms.push(m);return m;}
+let ft=0;
+for(let i=0;i<10;i++){const x=-14+i*.95, z=Math.sin(i*.9)*1.6;const ry=Math.atan2(.95,Math.cos(i*.9)*1.6*.9);addDom(x,z,-ry+Math.PI/2,ft);ft+=.22;}
+const split={x:-14+9*.95,z:Math.sin(9*.9)*1.6};
+const bA=[],bB=[];
+for(let i=1;i<=5;i++){const x=split.x+i*.8;addDom(x,split.z-i*.42,-.5,2.0+i*.22,domMatA);bA.push(doms[doms.length-1]);addDom(x,split.z+i*.42,.5,2.0+i*.22,domMatB);bB.push(doms[doms.length-1]);}
+const mgX=split.x+5*.8+.9, mgZ=split.z;
+const bridge=addDom(mgX,mgZ,0,0,domMatBr,true);
+let ft2=3.35;
+for(let i=0;i<6;i++){const x=mgX+.9+i*.85, z=mgZ+Math.sin(i*1.1)*.5;addDom(x,z,Math.PI/2+.2*Math.cos(i),ft2);ft2+=.2;}
+const lastDom=doms[doms.length-1];
+// funnel tower
+const funnelX=0,fZ=0;
+const tower=box(.5,6,.5,0x8d6e63,funnelX,3,fZ);
+const cone=new THREE.Mesh(new THREE.ConeGeometry(2.4,1.6,24,1,true),new THREE.MeshStandardMaterial({color:0x7b9bd4,side:THREE.DoubleSide,transparent:true,opacity:.85,roughness:.4}));cone.position.set(funnelX,6.2,fZ);S.add(cone);
+const helixPts=[];for(let a=0;a<=Math.PI*6;a+=.15){const r=2.1-(a/(Math.PI*6))*1.7;helixPts.push(new THREE.Vector3(funnelX+Math.cos(a)*r,6.1-(a/(Math.PI*6))*3.4,fZ+Math.sin(a)*r));}
+S.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(helixPts),new THREE.LineBasicMaterial({color:0xffd54a})));
+const tube=new THREE.Mesh(new THREE.CylinderGeometry(.32,.32,2.2,12,1,true),M(0x546e7a,.4,.4));tube.position.set(funnelX,1.6,fZ);S.add(tube);
+const marble=new THREE.Mesh(new THREE.SphereGeometry(.26,20,16),new THREE.MeshStandardMaterial({color:0xff1744,roughness:.25}));marble.castShadow=true;S.add(marble);
+marble.position.set(lastDom.position.x+.6,1.2,lastDom.position.z);
+// seesaw
+const seeX=3.6, seeG=new THREE.Group();seeG.position.set(seeX,.9,0);S.add(seeG);
+box(.4,.9,.4,0x78909c,seeX,.45,0);
+const plank=new THREE.Mesh(new THREE.BoxGeometry(4.2,.18,.7),M(0x26a69a));plank.castShadow=true;seeG.add(plank);plank.position.y=.15;
+const ball2=new THREE.Mesh(new THREE.SphereGeometry(.24,18,14),new THREE.MeshStandardMaterial({color:0x00e5ff,roughness:.3}));ball2.castShadow=true;S.add(ball2);
+// pendulum hammer
+const penX=7,penG=new THREE.Group();penG.position.set(penX,6.4,0);S.add(penG);
+box(.3,6.4,.3,0x5c6bc0,penX,3.2,-1.2);
+const arm=new THREE.Mesh(new THREE.BoxGeometry(.18,3.2,.18),M(0xb0bec5));arm.position.y=-1.6;arm.castShadow=true;penG.add(arm);
+const head=new THREE.Mesh(new THREE.BoxGeometry(.9,.9,.9),M(0xff6f00,.5));head.position.y=-3.2;head.castShadow=true;penG.add(head);
+penG.position.z=0;
+// block stack
+const blocks=[];const stackX=8.9;
+const bcols=[0xef5350,0xffee58,0x66bb6a,0x42a5f5,0xab47bc,0xffa726];
+[[0,0],[1,0],[-1,0],[.5,1],[-.5,1],[0,2]].forEach((p,i)=>{const b=new THREE.Mesh(new THREE.BoxGeometry(.8,.8,.8),M(bcols[i%bcols.length]));b.position.set(stackX+p[0]*.85,.4+p[1]*.82,0);b.castShadow=b.receiveShadow=true;S.add(b);blocks.push({m:b,p0:b.position.clone(),v:new THREE.Vector3(),av:new THREE.Vector3(),hit:false});});
+// pulley / flag / lamp
+const pulX=11.5;
+box(.3,5,.3,0x90a4ae,pulX-.9,2.5,0);box(.3,5,.3,0x90a4ae,pulX+.9,2.5,0);box(2.4,.25,.4,0x90a4ae,pulX,5,0);
+const wheel=new THREE.Mesh(new THREE.TorusGeometry(.4,.09,10,20),M(0xffd54a));wheel.position.set(pulX,4.8,0);S.add(wheel);
+const bucket=new THREE.Mesh(new THREE.CylinderGeometry(.5,.38,.6,14,1,true),new THREE.MeshStandardMaterial({color:0x8d6e63,side:THREE.DoubleSide}));bucket.castShadow=true;S.add(bucket);
+const bBot=new THREE.Mesh(new THREE.CircleGeometry(.38,14),M(0x8d6e63));bBot.rotation.x=-Math.PI/2;bucket.add(bBot);bBot.position.y=-.3;
+const ropeB=new THREE.Mesh(new THREE.BoxGeometry(.05,2,.05),M(0xffffff));S.add(ropeB);
+const flagPole=new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,4.6,10),M(0xcfd8dc));flagPole.position.set(pulX+1.7,2.3,-.8);flagPole.castShadow=true;S.add(flagPole);
+const flag=new THREE.Mesh(new THREE.PlaneGeometry(1.1,.7,6,3),new THREE.MeshStandardMaterial({color:0x00e676,side:THREE.DoubleSide}));flag.castShadow=true;S.add(flag);
+const lampPole=new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,3.4,10),M(0x37474f));lampPole.position.set(pulX+.4,1.7,1.6);S.add(lampPole);
+const bulb=new THREE.Mesh(new THREE.SphereGeometry(.32,18,14),new THREE.MeshStandardMaterial({color:0x555555,emissive:0x000000}));bulb.position.set(pulX+.4,3.6,1.6);S.add(bulb);
+// dust pool
+const dust=[];const dGeo=new THREE.SphereGeometry(.12,8,6);
+for(let i=0;i<90;i++){const m=new THREE.Mesh(dGeo,new THREE.MeshBasicMaterial({color:0xd7ccc8,transparent:true,opacity:0}));S.add(m);dust.push({m,v:new THREE.Vector3(),l:0});}
+let di=0;function puff(p,n=6,s=1){for(let k=0;k<n;k++){const d=dust[di++%dust.length];d.m.position.copy(p);d.v.set((Math.random()-.5)*3*s,Math.random()*2.5*s,(Math.random()-.5)*3*s);d.l=1;}}
+const V=(x,y,z)=>new THREE.Vector3(x,y,z);
+const foci=[V(-9,1,0),V(0,4,0),V(3.6,1.2,0),V(7.6,2.5,0),V(8.9,1.5,0),V(11.5,2.5,0),V(12.2,2.6,0)];
+const camP=[V(-9,5,10),V(0,7,10),V(3.6,3.5,8),V(5,4,9.5),V(8.9,3.4,8.5),V(11.5,4,8.5),V(12.5,4.5,9)];
+let curT=V(-9,1,0),curP=V(-9,5,10);
+const clock=new THREE.Clock();
+const lit=[false,false,false,false,false,false,false];
+function stageOf(t){if(t<4)return 0;if(t<6.55)return 1;if(t<7.8)return 2;if(t<9)return 3;if(t<11)return 4;if(t<14)return 5;return 6;}
+function smooth(a,b,x){const u=Math.min(1,Math.max(0,(x-a)/(b-a)));return u*u*(3-2*u);}
+marble.userData.held=true;
+blocks.forEach(b=>b.v.set(0,0,0));
+function resetDyn(){lit.fill(false);blocks.forEach(b=>{b.m.position.copy(b.p0);b.m.rotation.set(0,0,0);b.v.set(0,0,0);b.hit=false;});}
+function animate(){
+requestAnimationFrame(animate);
+const el=clock.getElapsedTime(),t=el%T;
+bar.style.width=(t/T*100)+'%';
+const st=stageOf(t);
+if(t<.1)resetDyn();
+els.forEach((e,i)=>e.classList.toggle('on',i<=st));
+// fire dust once per stage
+for(let i=0;i<7;i++){const should=t>=fireTimes[i];if(should&&!lit[i]){lit[i]=true;puff(foci[i],10,1.2);}if(!should&&t<1)lit[i]=false;}
+// stage1 dominoes
+for(const d of doms){const u=d.userData;const p=(t-u.ft)/.38;const a=p<=0?0:p>=1?1.32:p*1.32;const e=1-Math.pow(1-Math.min(1,Math.max(0,p)),3);const ang=a*e/a*a||a;const aa=p<=0?0:(p>=1?1.32:a);d.rotation.y=u.ry;d.rotation.x=-aa;const c=Math.cos(aa);d.position.y=.6*c+.12;d.position.x=u.x+Math.sin(aa)*.5*Math.cos(u.ry);d.position.z=u.z-Math.sin(aa)*.5*Math.sin(u.ry);
+if(p>0&&p<.12&&!d.userData.pf){d.userData.pf=true;if(Math.random()<.4)puff(d.position,2,.4);}if(t<.2)d.userData.pf=false;}
+bridge.position.y=.14+Math.sin(Math.min(1,Math.max(0,(t-3.1)/.4))*Math.PI)*.06;
+// stage2 marble spiral + drop
+const m1=smooth(4,6.2,t);
+if(t<4){marble.position.set(lastDom.position.x+.7,1.1,lastDom.position.z);}
+else if(t<6.2){const a=t*4.2;const r=2.1-m1*1.75;marble.position.set(funnelX+Math.cos(a)*r,6.1-m1*3.4,fZ+Math.sin(a)*r);}
+else if(t<6.6){const u=(t-6.2)/.4;marble.position.set(funnelX+(seeX-2.0-funnelX)*u,2.7-1.4*u*u,0);}
+else if(t<6.95){marble.position.set(seeX-2.0,.9,0);}
+// seesaw + ball2 launch
+let seeAng=-.28;
+if(t>=6.6){seeAng=-.28+smooth(6.6,6.95,t)*.62;if(!seeG.userData.p&&t>6.6){seeG.userData.p=true;puff(V(seeX-2,.9,0),7,.8);} }
+if(t<6)seeG.userData.p=false;
+seeG.rotation.z=seeAng;plank.position.y=.15;
+const L0=V(seeX+1.9,1.5,0),L1=V(penX-.4,3.4,0);
+if(t<6.95){ball2.position.set(seeX+1.9,1.15+Math.sin(seeAng)*1.0,0);}
+else if(t<7.9){const u=(t-6.95)/.95;ball2.position.lerpVectors(L0,L1,u);ball2.position.y+=Math.sin(u*Math.PI)*1.6;if(u>.9&&!ball2.userData.p){ball2.userData.p=true;puff(L1,6,.7);penG.userData.kick=t;} }
+else{ball2.position.copy(L1);}if(t<6)ball2.userData.p=false;
+// stage4 pendulum
+let pa=-.55;
+const kick=penG.userData.kick||7.9;const kt=Math.max(0,t-7.8);
+if(t<7.8)pa=-.55+Math.sin(el*1.2)*.04;
+else pa=-.55+smooth(7.8,8.9,t)*1.25;
+if(t<.2)penG.userData.kick=null;
+penG.rotation.z=pa;
+if(t>8.85&&!penG.userData.p2){penG.userData.p2=true;puff(V(stackX,1.2,0),12,1.3);}if(t<1)penG.userData.p2=false;
+// stage5 blocks physics-lite
+if(t>=8.9){for(let i=0;i<blocks.length;i++){const b=blocks[i];if(!b.hit){b.hit=true;const dir=(i%2?1:-1);b.v.set(-1.5+Math.random()*4+ (i<2?3:0),2+Math.random()*3.2,(Math.random()-.5)*5+dir*1.2);b.av.set(Math.random()*6-3,Math.random()*4-2,Math.random()*6-3);if(i===1){b.v.set(3.4,4.2,.3);b.av.set(1,0,2);}}
+b.v.y-=9.8*.016;b.m.position.addScaledVector(b.v,.016);b.m.rotation.x+=b.av.x*.016;b.m.rotation.y+=b.av.y*.016;b.m.rotation.z+=b.av.z*.016;
+if(b.m.position.y<.4){b.m.position.y=.4;b.v.set(b.v.x*.4,Math.abs(b.v.y)>.8?-b.v.y*.3:0,b.v.z*.4);b.av.multiplyScalar(.7);if(Math.abs(b.v.x)+Math.abs(b.v.z)>.4&&Math.random()<.05)puff(b.m.position,2,.4);}}}
+// guide block#1 into bucket visually near end
+if(t>=10.6&&t<14){const b=blocks[1];b.m.position.lerp(V(pulX-.0,2.6,0),.12);b.v.set(0,0,0);b.av.set(0,0,0);}
+// stage6 pulley->flag
+const pu=smooth(11,13.5,t);
+const bY=t<11?3.6:3.6-pu*1.8;bucket.position.set(pulX,bY,0);bucket.rotation.z=t>11.2?(t>12?-.5*Math.min(1,(t-12)):0):0;
+ropeB.position.set(pulX,(bY+4.8)/2,0);ropeB.scale.y=Math.max(.1,(4.8-bY)/2);
+const fY=t<11?.6:.6+pu*3.2;flag.position.set(pulX+1.7,Math.min(4.3,fY),-.8);flag.rotation.y=Math.sin(el*6)*.25*(t>11?1:0);
+wheel.rotation.z=-pu*6;
+if(t>11.3&&!S.userData.pb){S.userData.pb=true;puff(V(pulX,2.4,0),8,.9);}if(t<1)S.userData.pb=false;
+// stage7 lamp finale within last second
+const lampOn=t>=14;
+bulb.material.emissive.setHex(lampOn?0xffb300:0x000000);bulb.material.color.set(lampOn?0xffe082:0x555555);
+lampLight.intensity=lampOn?30+Math.sin(el*20)*4:0;
+if(lampOn)msg.textContent='FINALE • FLAG + LIGHT • resetting…';else msg.textContent='STAGE '+(st+1)+' / 7 • '+names[st];
+if(t>=14&&!S.userData.lp){S.userData.lp=true;puff(bulb.position,10,1);}if(t<1)S.userData.lp=false;
+// camera track
+const ci=st;curT.lerp(foci[ci],.06);curP.lerp(camP[ci],.045);
+C.position.copy(curP);C.lookAt(curT);
+// dust update
+for(const d of dust){if(d.l>0){d.l-=.03;d.m.position.addScaledVector(d.v,.016);d.v.y-=2*.016;d.v.multiplyScalar(.985);d.m.material.opacity=Math.max(0,d.l*.7);const s=1+(1-d.l)*1.6;d.m.scale.set(s,s,s);}}
+R.render(S,C);
+}
+animate();
+</script></body></html>

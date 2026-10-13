@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SDF</title>
+<style>html,body{margin:0;padding:0;overflow:hidden;background:#000;height:100%}canvas{display:block;width:100vw;height:100vh}</style>
+</head><body>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'three';
+const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene=new THREE.Scene();
+const camera=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+const uniforms={uTime:{value:0},uRes:{value:new THREE.Vector2(innerWidth,innerHeight)}};
+const frag=`
+precision highp float;
+varying vec2 vUv;
+uniform float uTime;
+uniform vec2 uRes;
+float hash1(float n){return fract(sin(n)*43758.5453123);}
+float hash13(vec3 p){p=fract(p*0.1031);p+=dot(p,p.zyx+31.32);return fract((p.x+p.y)*p.z);}
+vec3 hash33(vec3 p){p=fract(p*vec3(0.1031,0.1030,0.0973));p+=dot(p,p.yxz+33.33);return fract((p.xxy+p.yxx)*p.zyx);}
+float noise(vec3 p){vec3 i=floor(p);vec3 f=fract(p);f=f*f*(3.0-2.0*f);
+ return mix(mix(mix(hash13(i+vec3(0.,0.,0.)),hash13(i+vec3(1.,0.,0.)),f.x),mix(hash13(i+vec3(0.,1.,0.)),hash13(i+vec3(1.,1.,0.)),f.x),f.y),
+ mix(mix(hash13(i+vec3(0.,0.,1.)),hash13(i+vec3(1.,0.,1.)),f.x),mix(hash13(i+vec3(0.,1.,1.)),hash13(i+vec3(1.,1.,1.)),f.x),f.y),f.z);}
+float fbm(vec3 p){float v=0.0;float a=0.5;for(int i=0;i<4;i++){v+=a*noise(p);p*=2.03;a*=0.5;}return v;}
+float smin(float a,float b,float k){float h=clamp(0.5+0.5*(b-a)/k,0.0,1.0);return mix(b,a,h)-k*h*(1.0-h);}
+float sdSphere(vec3 p,float r){return length(p)-r;}
+float sdTorus(vec3 p,vec2 t){vec2 q=vec2(length(p.xz)-t.x,p.y);return length(q)-t.y;}
+float sdBox(vec3 p,vec3 b){vec3 q=abs(p)-b;return length(max(q,0.0))+min(max(q.x,max(q.y,q.z)),0.0)-0.08;}
+float sdCapsule(vec3 p,vec3 a,vec3 b,float r){vec3 pa=p-a;vec3 ba=b-a;float h=clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0);return length(pa-ba*h)-r;}
+float sdCylinder(vec3 p,float r,float h){vec2 d=vec2(length(p.xz)-r,abs(p.y)-h);return min(max(d.x,d.y),0.0)+length(max(d,0.0))-0.05;}
+float sdOcta(vec3 p,float s){p=abs(p);float m=p.x+p.y+p.z-s;vec3 q;
+ if(3.0*p.x<m)q=p.xyz;else if(3.0*p.y<m)q=p.yzx;else if(3.0*p.z<m)q=p.zxy;else return m*0.57735027;
+ float k=clamp(0.5*(q.z-q.y+s),0.0,s);return length(vec3(q.x,q.y-s+k,q.z-k));}
+mat3 rotY(float a){float c=cos(a);float s=sin(a);return mat3(c,0.,s,0.,1.,0.,-s,0.,c);}
+mat3 rotX(float a){float c=cos(a);float s=sin(a);return mat3(1.,0.,0.,0.,c,-s,0.,s,c);}
+mat3 rotZ(float a){float c=cos(a);float s=sin(a);return mat3(c,-s,0.,s,c,0.,0.,0.,1.);}
+vec2 opU(vec2 a,vec2 b){return a.x<b.x?a:b;}
+vec2 map(vec3 p){
+ float t=uTime;
+ vec2 res=vec2(p.y,0.0);
+ float k=0.55+0.35*sin(t*0.7);
+ // central morphing cluster: sphere + torus + box smooth blended
+ vec3 c0=vec3(0.0,1.35+0.15*sin(t*1.1),0.0);
+ float dS=sdSphere(p-c0,1.05+0.12*sin(t*1.3));
+ vec3 tp=rotX(t*0.6)*rotZ(0.4*sin(t*0.5))*(p-c0);
+ float dT=sdTorus(tp,vec2(1.15,0.32));
+ vec3 bp=rotY(t*0.45)*rotX(t*0.3)*(p-vec3(0.9*sin(t*0.8),1.5+0.3*cos(t*0.9),0.3*sin(t*0.6)));
+ float dB=sdBox(bp,vec3(0.62,0.62,0.62));
+ float morph=smin(dS,dT,k);
+ morph=smin(morph,dB,k*0.9);
+ // small satellite sphere orbiting and blending in/out
+ vec3 satPos=c0+vec3(1.9*cos(t*0.9),0.5*sin(t*1.7),1.9*sin(t*0.9));
+ float dSat=sdSphere(p-satPos,0.42);
+ morph=smin(morph,dSat,0.7);
+ res=opU(res,vec2(morph,1.0));
+ // capsule - rotating like a baton
+ vec3 capC=vec3(-2.6,1.6+0.35*sin(t*0.9+1.0),-0.6);
+ vec3 dir=normalize(vec3(cos(t*0.8),0.6*sin(t*1.1),sin(t*0.8)));
+ float dCap=sdCapsule(p,capC-dir*0.9,capC+dir*0.9,0.32);
+ res=opU(res,vec2(dCap,2.0));
+ // cylinder - pulsing pillar
+ vec3 cylC=vec3(2.7,1.0,-1.4);
+ float dCyl=sdCylinder(rotY(t*0.5)*(p-cylC),0.55+0.08*sin(t*1.4),0.9);
+ res=opU(res,vec2(dCyl,3.0));
+ // octahedron - floating gem
+ vec3 octC=vec3(2.3*cos(t*0.4),3.1+0.4*sin(t*1.2),2.3*sin(t*0.4)-0.5);
+ float dOct=sdOcta(rotY(t*0.9)*rotX(t*0.6)*(p-octC),0.85);
+ res=opU(res,vec2(dOct,4.0));
+ // lava sphere
+ vec3 lavaC=vec3(-2.4,0.85,2.2+0.3*sin(t*0.5));
+ float wob=0.06*sin(6.0*p.x+t*2.0)*sin(6.0*p.z+t*1.7);
+ float dLava=sdSphere(p-lavaC,0.82)+wob*0.4;
+ res=opU(res,vec2(dLava,5.0));
+ // two extra spheres blending with floor cluster
+ float dS2=sdSphere(p-vec3(1.6,0.6,2.4),0.6+0.1*sin(t*1.6));
+ float dS3=sdSphere(p-vec3(2.1,0.45,1.8),0.45);
+ float blob=smin(dS2,dS3,0.5);
+ res=opU(res,vec2(blob,2.0));
+ return res;
+}
+vec3 calcNormal(vec3 p){
+ vec2 e=vec2(1.0,-1.0)*0.0008;
+ return normalize(e.xyy*map(p+e.xyy).x+e.yyx*map(p+e.yyx).x+e.yxy*map(p+e.yxy).x+e.xxx*map(p+e.xxx).x);
+}
+float march(vec3 ro,vec3 rd,out float matId){
+ float t=0.02; matId=-1.0;
+ for(int i=0;i<96;i++){
+  vec3 p=ro+rd*t;
+  vec2 h=map(p);
+  if(h.x<0.001*t+0.001){matId=h.y;return t;}
+  t+=h.x*0.9;
+  if(t>40.0)break;
+ }
+ return -1.0;
+}
+float softShadow(vec3 ro,vec3 rd){
+ float res=1.0; float t=0.05;
+ for(int i=0;i<32;i++){
+  float h=map(ro+rd*t).x;
+  res=min(res,12.0*h/t);
+  t+=clamp(h,0.03,0.35);
+  if(res<0.02||t>12.0)break;
+ }
+ return clamp(res,0.0,1.0);
+}
+float calcAO(vec3 p,vec3 n){
+ float occ=0.0; float sca=1.0;
+ for(int i=0;i<5;i++){
+  float h=0.02+0.12*float(i);
+  float d=map(p+n*h).x;
+  occ+=(h-d)*sca; sca*=0.75;
+ }
+ return clamp(1.0-2.2*occ,0.0,1.0);
+}
+vec3 bgColor(vec3 rd){
+ float h=clamp(rd.y*0.5+0.5,0.0,1.0);
+ vec3 col=mix(vec3(0.06,0.05,0.12),vec3(0.02,0.03,0.10),h);
+ col=mix(col,vec3(0.25,0.10,0.20),pow(1.0-abs(rd.y),4.0)*0.6);
+ // starfield
+ vec3 sp=rd*80.0;
+ vec3 id=floor(sp);
+ float s=hash13(id);
+ if(s>0.985){
+  vec3 f=fract(sp)-0.5;
+  float star=smoothstep(0.35,0.0,length(f))*(0.6+0.4*sin(uTime*3.0+s*40.0));
+  col+=vec3(star)*step(0.0,rd.y);
+ }
+ return col;
+}
+vec3 materialColor(float id,vec3 p,out float rough,out vec3 emissive){
+ emissive=vec3(0.0); rough=0.35;
+ if(id<0.5){ // floor checker
+  float ch=mod(floor(p.x)+floor(p.z),2.0);
+  vec3 c=mix(vec3(0.08,0.08,0.10),vec3(0.85,0.85,0.88),ch);
+  float d=length(p.xz);
+  c*=exp(-d*0.04);
+  rough=0.25;
+  return c;
+ }else if(id<1.5){rough=0.18;return vec3(0.20,0.55,0.95);}
+ else if(id<2.5){rough=0.30;return vec3(0.95,0.45,0.15);}
+ else if(id<3.5){rough=0.20;return vec3(0.20,0.90,0.55);}
+ else if(id<4.5){rough=0.10;return vec3(0.85,0.30,0.95);}
+ else{
+  // lava cracks
+  float n=fbm(p*3.5+vec3(0.0,uTime*0.15,0.0));
+  float n2=fbm(p*7.0-vec3(uTime*0.1));
+  float crack=smoothstep(0.48,0.50,n)*smoothstep(0.52,0.50,n);
+  crack+=smoothstep(0.47,0.50,n2)*smoothstep(0.53,0.50,n2)*0.7;
+  float pulse=0.75+0.55*sin(uTime*2.5+n*10.0);
+  emissive=vec3(1.0,0.25,0.02)*crack*4.0*pulse+vec3(1.0,0.6,0.1)*pow(crack,3.0)*3.0*pulse;
+  rough=0.6;
+  return vec3(0.08,0.06,0.05);
+ }
+}
+vec3 shade(vec3 p,vec3 n,vec3 rd,float id,bool refl){
+ float rough; vec3 emissive;
+ vec3 alb=materialColor(id,p,rough,emissive);
+ vec3 ligPos=vec3(5.0*cos(uTime*0.3),7.0,5.0*sin(uTime*0.3));
+ vec3 ligDir=normalize(ligPos-p);
+ float dif=clamp(dot(n,ligDir),0.0,1.0);
+ float sh=refl?1.0:softShadow(p+n*0.02,ligDir);
+ vec3 hv=normalize(ligDir-rd);
+ float spec=pow(clamp(dot(n,hv),0.0,1.0),mix(120.0,18.0,rough))*(1.0-rough);
+ float ao=refl?0.85:calcAO(p,n);
+ float fres=pow(1.0-clamp(dot(n,-rd),0.0,1.0),3.0);
+ vec3 amb=vec3(0.25,0.28,0.40)*(0.5+0.5*n.y);
+ vec3 col=alb*(amb*ao+vec3(1.2,1.05,0.9)*dif*sh*ao);
+ col+=vec3(1.0,0.95,0.85)*spec*sh;
+ col+=vec3(0.35,0.55,1.0)*fres*0.6; // rim glow
+ col+=emissive;
+ // point glow from lava
+ vec3 lavaC=vec3(-2.4,0.85,2.2);
+ float ld=length(p-lavaC);
+ col+=vec3(1.0,0.3,0.05)*(0.35/(1.0+ld*ld*0.4))*(0.7+0.3*sin(uTime*2.5));
+ return col;
+}
+vec3 particles(vec3 ro,vec3 rd,float tmax){
+ vec3 col=vec3(0.0);
+ for(int i=0;i<28;i++){
+  float fi=float(i);
+  vec3 seed=hash33(vec3(fi*1.23,fi*2.71,fi*0.37));
+  vec3 pp=vec3(seed.x*12.0-6.0,mod(seed.y*6.0+uTime*(0.25+seed.z*0.4),6.0)+0.2,seed.z*12.0-6.0);
+  pp.x+=0.3*sin(uTime*0.7+fi);
+  pp.z+=0.3*cos(uTime*0.6+fi*1.3);
+  vec3 toP=pp-ro;
+  float proj=dot(toP,rd);
+  if(proj<0.1||proj>tmax)continue;
+  float d=length(toP-rd*proj);
+  float glow=0.012/(d*d+0.008);
+  glow*=smoothstep(tmax,tmax*0.7,proj);
+  float tw=0.6+0.4*sin(uTime*4.0+fi*7.0);
+  vec3 pc=mix(vec3(1.0,0.6,0.2),vec3(0.4,0.7,1.0),seed.y);
+  col+=pc*glow*0.06*tw;
+ }
+ return col;
+}
+vec3 aces(vec3 x){return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0,1.0);}
+void main(){
+ vec2 uv=(2.0*gl_FragCoord.xy-uRes)/uRes.y;
+ float t=uTime;
+ // camera spline: orbit + dive + rise (smooth analytic spline-like path)
+ float a=t*0.18;
+ float r=7.0+2.2*sin(t*0.22)+0.8*sin(t*0.53);
+ float h=3.2+2.4*sin(t*0.31)+0.7*sin(t*0.71);
+ h=max(h,0.7);
+ vec3 ro=vec3(sin(a)*r,h,cos(a)*r);
+ vec3 ta=vec3(0.3*sin(t*0.4),1.3+0.4*sin(t*0.5),0.3*cos(t*0.35));
+ vec3 fw=normalize(ta-ro);
+ vec3 rgt=normalize(cross(fw,vec3(0.0,1.0,0.0)));
+ vec3 up=cross(rgt,fw);
+ vec3 rd=normalize(uv.x*rgt+uv.y*up+1.6*fw);
+ float matId;
+ float dist=march(ro,rd,matId);
+ vec3 col=bgColor(rd);
+ float fogDist=40.0;
+ if(dist>0.0){
+  fogDist=dist;
+  vec3 p=ro+rd*dist;
+  vec3 n=calcNormal(p);
+  col=shade(p,n,rd,matId,false);
+  // one-bounce reflection
+  float roughTmp; vec3 emTmp; materialColor(matId,p,roughTmp,emTmp);
+  float fres=pow(1.0-clamp(dot(n,-rd),0.0,1.0),3.0);
+  float reflAmt=mix(0.08,0.75,1.0-roughTmp)*(0.35+0.65*fres);
+  if(matId<0.5)reflAmt=0.45+0.4*fres;
+  vec3 rrd=reflect(rd,n);
+  vec3 rro=p+n*0.02;
+  float rMat;
+  float rDist=march(rro,rrd,rMat);
+  vec3 rCol=bgColor(rrd);
+  if(rDist>0.0){
+   vec3 rp=rro+rrd*rDist;
+   vec3 rn=calcNormal(rp);
+   rCol=shade(rp,rn,rrd,rMat,true);
+   float rFog=1.0-exp(-rDist*0.045);
+   rCol=mix(rCol,vec3(0.08,0.07,0.14),rFog);
+  }
+  col=mix(col,rCol,clamp(reflAmt,0.0,0.85));
+ }
+ col+=particles(ro,rd,fogDist);
+ // fog
+ float fogF=1.0-exp(-fogDist*0.035);
+ col=mix(col,vec3(0.08,0.07,0.14),fogF*0.85);
+ // filmic + gamma + vignette
+ col=aces(col*1.15);
+ col=pow(col,vec3(0.4545));
+ vec2 vg=vUv-0.5;
+ float vig=1.0-dot(vg,vg)*1.15;
+ col*=clamp(vig,0.0,1.0);
+ gl_FragColor=vec4(col,1.0);
+}
+`;
+const vert=`varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.0,1.0);}`;
+const mat=new THREE.ShaderMaterial({uniforms,vertexShader:vert,fragmentShader:frag,depthWrite:false,depthTest:false});
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),mat));
+addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);uniforms.uRes.value.set(innerWidth,innerHeight);});
+const clock=new THREE.Clock();
+renderer.setAnimationLoop(()=>{uniforms.uTime.value=clock.getElapsedTime();renderer.render(scene,camera);});
+</script>
+</body></html>

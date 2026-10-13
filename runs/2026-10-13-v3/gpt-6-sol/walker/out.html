@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gauntlet</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #080e1b; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; top: 26px; left: 30px; color: #e8f7ff;
+    font: 700 13px/1.4 system-ui, sans-serif; letter-spacing: .17em;
+    text-transform: uppercase; pointer-events: none; text-shadow: 0 2px 12px #000;
+  }
+  #phase { font-size: clamp(18px, 3vw, 34px); letter-spacing: .08em; }
+  #counter { margin-top: 7px; color: #74e8ef; }
+  #bar { width: 180px; height: 3px; margin-top: 14px; background: #ffffff30; }
+  #progress { height: 100%; width: 0; background: #74e8ef; box-shadow: 0 0 12px #74e8ef; }
+  #slow {
+    position: fixed; right: 30px; top: 30px; color: #ffcc83;
+    font: 800 12px system-ui, sans-serif; letter-spacing: .2em;
+    opacity: 0; transition: opacity .15s; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div id="phase">Sprint start</div>
+  <div id="counter">HITS 00 / 05</div>
+  <div id="bar"><div id="progress"></div></div>
+</div>
+<div id="slow">SLOW MOTION</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x080e1b);
+scene.fog = new THREE.FogExp2(0x101a2b, 0.027);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.45;
+document.body.appendChild(renderer.domElement);
+
+const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(-9, 4.7, 8);
+const cameraTarget = new THREE.Vector3(-8, 1.5, -2);
+camera.lookAt(cameraTarget);
+
+const mat = (color, metalness = 0.12, roughness = 0.72, emissive = 0) =>
+  new THREE.MeshStandardMaterial({ color, metalness, roughness, emissive });
+const dark = mat(0x101b2b, 0.35);
+const steel = mat(0x617d91, 0.7, 0.34);
+const cyan = mat(0x51d9df, 0.36, 0.32, 0x0a363b);
+const orange = mat(0xea8156, 0.28, 0.42, 0x351407);
+const dummyMat = mat(0x936d5e, 0.12, 0.85);
+const dummyDark = mat(0x493a3c, 0.1, 0.85);
+const glow = new THREE.MeshBasicMaterial({ color: 0x9efcff });
+
+function mesh(parent, geometry, material, x = 0, y = 0, z = 0) {
+  const m = new THREE.Mesh(geometry, material);
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  parent.add(m);
+  return m;
+}
+function box(parent, w, h, d, material, x = 0, y = 0, z = 0) {
+  return mesh(parent, new THREE.BoxGeometry(w, h, d), material, x, y, z);
+}
+function joint(parent, x, y, z, radius, material) {
+  const pivot = new THREE.Group();
+  pivot.position.set(x, y, z);
+  parent.add(pivot);
+  mesh(pivot, new THREE.SphereGeometry(radius, 12, 8), material);
+  return pivot;
+}
+
+const floorCanvas = document.createElement('canvas');
+floorCanvas.width = floorCanvas.height = 512;
+const ctx = floorCanvas.getContext('2d');
+for (let row = 0; row < 16; row++) {
+  for (let col = 0; col < 24; col++) {
+    ctx.fillStyle = (row + col) % 2 ? '#253443' : '#304153';
+    ctx.fillRect(col * 512 / 24, row * 512 / 16, 512 / 24 + 1, 512 / 16 + 1);
+  }
+}
+const floorTexture = new THREE.CanvasTexture(floorCanvas);
+floorTexture.colorSpace = THREE.SRGBColorSpace;
+floorTexture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 8);
+const floor = mesh(
+  scene, new THREE.PlaneGeometry(24, 16),
+  new THREE.MeshStandardMaterial({ map: floorTexture, roughness: 0.95 }),
+  0, -0.035, 0
+);
+floor.rotation.x = -Math.PI / 2;
+floor.castShadow = false;
+
+const wallMaterial = mat(0x182639, 0.18, 0.85);
+box(scene, 24, 5, .38, wallMaterial, 0, 2.45, -7.85);
+box(scene, .38, 5, 16, wallMaterial, -11.8, 2.45, 0);
+box(scene, .38, 5, 16, wallMaterial, 11.8, 2.45, 0);
+
+const runWall = box(scene, 13.2, 4.8, .42, mat(0x223849, .25), -4.1, 2.4, -5.42);
+runWall.receiveShadow = true;
+for (let i = 0; i < 21; i++) {
+  const x = -10.35 + i * .62;
+  box(scene, .085, 4.6, .035, i % 4 === 0 ? orange : steel, x, 2.42, -5.175);
+}
+box(scene, 13.3, .13, .14, cyan, -4.1, 4.79, -5.18);
+box(scene, 13.3, .13, .16, dark, -4.1, .14, -5.15);
+
+// Empty stepped stands beyond the run wall.
+for (let tier = 0; tier < 4; tier++) {
+  const z = -7.45 + tier * .45;
+  box(scene, 23, .25 + tier * .28, .49, tier % 2 ? dark : wallMaterial,
+      0, .18 + tier * .14, z);
+  for (let x = -10.8; x <= 10.8; x += 1.2) {
+    box(scene, .035, .33, .035, steel, x, .45 + tier * .26, z + .19);
+  }
+}
+for (const x of [-11.45, 11.45]) {
+  for (let z = -6.4; z <= 6.5; z += 2.4) {
+    box(scene, .09, 3.5, .09, steel, x, 1.75, z);
+  }
+}
+
+// Ground scuffs: transparent, flattened decals just above the tiles.
+let seed = 1947;
+function random() {
+  seed = (seed * 1664525 + 1013904223) >>> 0;
+  return seed / 4294967296;
+}
+const scuffMat = new THREE.MeshBasicMaterial({
+  color: 0x08131f, transparent: true, opacity: .17, depthWrite: false
+});
+for (let i = 0; i < 65; i++) {
+  const scuff = mesh(scene, new THREE.CircleGeometry(.35 + random() * .45, 18),
+    scuffMat, -10 + random() * 20, .003 + i * .00002, -4.8 + random() * 10.6);
+  scuff.rotation.x = -Math.PI / 2;
+  scuff.rotation.z = random() * Math.PI;
+  scuff.scale.set(.25 + random() * .45, .03 + random() * .07, 1);
+  scuff.castShadow = false;
+}
+
+scene.add(new THREE.HemisphereLight(0x9abed1, 0x1a1722, 1.3));
+const sun = new THREE.DirectionalLight(0xffe4bb, 3.1);
+sun.position.set(-4, 11, 8);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -16;
+sun.shadow.camera.right = 16;
+sun.shadow.camera.top = 12;
+sun.shadow.camera.bottom = -12;
+sun.shadow.normalBias = .025;
+sun.shadow.radius = 3;
+scene.add(sun);
+function point(color, intensity, x, y, z, distance) {
+  const light = new THREE.PointLight(color, intensity, distance, 2);
+  light.position.set(x, y, z);
+  scene.add(light);
+}
+point(0x50dce6, 85, -6, 3, -4.2, 9);
+point(0xff7144, 100, 8, 3.8, -2, 10);
+point(0x776bff, 75, 1, 4.5, 4, 12);
+
+function makeFighter(isDummy) {
+  const root = new THREE.Group();
+  scene.add(root);
+  const suit = isDummy ? dummyMat : dark;
+  const trim = isDummy ? dummyDark : cyan;
+  const armor = isDummy ? dummyMat : steel;
+  const j = {};
+  box(root, .68, .28, .38, armor);
+  box(root, .5, .15, .43, trim, 0, -.16, .02);
+
+  j.waist = joint(root, 0, .2, 0, .18, trim);
+  box(j.waist, .82, .83, .43, suit, 0, .45, 0);
+  box(j.waist, .72, .14, .48, trim, 0, .72, .01);
+  box(j.waist, .45, .28, .035, armor, 0, .48, .235);
+  j.neck = joint(j.waist, 0, 1.02, 0, .13, armor);
+  const head = mesh(j.neck, new THREE.SphereGeometry(.29, 16, 12), armor, 0, .25, 0);
+  head.scale.set(1, 1.08, .91);
+  box(j.neck, .48, .12, .05, isDummy ? dummyDark : glow, 0, .28, .265);
+  box(j.neck, .26, .08, .07, trim, 0, .08, .27);
+
+  for (const [side, tag] of [[-1, 'L'], [1, 'R']]) {
+    const shoulder = joint(j.waist, side * .55, .82, 0, .18, armor);
+    j['sh' + tag] = shoulder;
+    box(shoulder, .26, .54, .29, suit, 0, -.29, 0);
+    box(shoulder, .31, .19, .32, trim, 0, -.12, 0);
+    const elbow = joint(shoulder, 0, -.57, 0, .135, armor);
+    j['el' + tag] = elbow;
+    box(elbow, .22, .52, .25, armor, 0, -.26, 0);
+    const hand = joint(elbow, 0, -.54, 0, .12, suit);
+    j['hand' + tag] = hand;
+    box(hand, .19, .2, .19, trim, 0, -.08, .01);
+
+    const hip = joint(root, side * .25, -.18, 0, .18, armor);
+    j['hip' + tag] = hip;
+    box(hip, .3, .56, .35, suit, 0, -.29, 0);
+    box(hip, .32, .22, .38, trim, 0, -.14, .01);
+    const knee = joint(hip, 0, -.58, 0, .145, armor);
+    j['knee' + tag] = knee;
+    box(knee, .25, .56, .29, armor, 0, -.28, 0);
+    const ankle = joint(knee, 0, -.58, 0, .115, trim);
+    j['ankle' + tag] = ankle;
+    box(ankle, .28, .17, .57, suit, 0, -.06, .17);
+    box(ankle, .29, .055, .58, trim, 0, -.15, .17);
+  }
+  if (!isDummy) {
+    const hand = j.handR;
+    mesh(hand, new THREE.CylinderGeometry(.045, .055, .4, 8), dark, 0, -.26, 0);
+    mesh(hand, new THREE.CylinderGeometry(.018, .075, .83, 5), glow, 0, -.81, 0);
+    box(hand, .38, .055, .11, steel, 0, -.47, 0);
+  }
+  return { root, j, animated: Object.values(j) };
+}
+const hero = makeFighter(false);
+const enemy = makeFighter(true);
+enemy.root.scale.setScalar(.92);
+
+const arcGeometry = new THREE.BufferGeometry();
+const arcVertices = [];
+const arcColors = [];
+for (let i = 0; i < 80; i++) {
+  const a0 = -.3 * Math.PI + i / 80 * 1.65 * Math.PI;
+  const a1 = -.3 * Math.PI + (i + 1) / 80 * 1.65 * Math.PI;
+  function vertex(a, radius, fade) {
+    arcVertices.push(Math.cos(a) * radius, Math.sin(a * 2) * .12, Math.sin(a) * radius);
+    arcColors.push(.35 * fade, (1 + .1 * fade) * fade, fade);
+  }
+  const fade0 = Math.sin(Math.PI * i / 80) * .9 + .1;
+  const fade1 = Math.sin(Math.PI * (i + 1) / 80) * .9 + .1;
+  vertex(a0, 1.18, fade0); vertex(a0, 1.8, fade0); vertex(a1, 1.8, fade1);
+  vertex(a0, 1.18, fade0); vertex(a1, 1.8, fade1); vertex(a1, 1.18, fade1);
+}
+arcGeometry.setAttribute('position', new THREE.Float32BufferAttribute(arcVertices, 3));
+arcGeometry.setAttribute('color', new THREE.Float32BufferAttribute(arcColors, 3));
+arcGeometry.computeVertexNormals();
+const arcMaterial = new THREE.MeshBasicMaterial({
+  vertexColors: true, side: THREE.DoubleSide, transparent: true,
+  opacity: .8, depthWrite: false, blending: THREE.AdditiveBlending
+});
+const arc = new THREE.Mesh(arcGeometry, arcMaterial);
+arc.visible = false;
+scene.add(arc);
+
+const shockMaterial = new THREE.MeshBasicMaterial({
+  color: 0x82f6ff, transparent: true, opacity: 0,
+  depthWrite: false, blending: THREE.AdditiveBlending
+});
+const shock = new THREE.Mesh(new THREE.TorusGeometry(1, .035, 6, 96), shockMaterial);
+shock.rotation.x = Math.PI / 2;
+shock.position.y = .055;
+scene.add(shock);
+const shock2 = new THREE.Mesh(new THREE.TorusGeometry(1, .018, 4, 96), shockMaterial.clone());
+shock2.rotation.x = Math.PI / 2;
+shock2.position.y = .065;
+scene.add(shock2);
+
+const dustCount = 120;
+const dustPositions = new Float32Array(dustCount * 3);
+const dustGeometry = new THREE.BufferGeometry();
+dustGeometry.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
+const dust = new THREE.Points(dustGeometry, new THREE.PointsMaterial({
+  color: 0xb4c8ce, size: .085, transparent: true, opacity: .6,
+  depthWrite: false, sizeAttenuation: true
+}));
+scene.add(dust);
+const dustData = Array.from({ length: dustCount }, (_, i) => {
+  const a = random() * Math.PI * 2;
+  return {
+    event: i < 50 ? 6.88 : 12.9,
+    x: i < 50 ? 4.05 : 6.5,
+    z: i < 50 ? -1.8 : -1.35,
+    a, speed: .5 + random() * 2.6,
+    lift: .35 + random() * 1.35,
+    delay: random() * .12
+  };
+});
+
+const phaseEl = document.getElementById('phase');
+const counterEl = document.getElementById('counter');
+const progressEl = document.getElementById('progress');
+const slowEl = document.getElementById('slow');
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const smooth = v => { v = clamp(v); return v * v * (3 - 2 * v); };
+const mix = (a, b, p) => a + (b - a) * p;
+const gauss = (t, center, width) => Math.exp(-((t - center) / width) ** 2);
+
+function resetPose(rig) {
+  for (const part of rig.animated) part.rotation.set(0, 0, 0);
+}
+function runPose(j, cycle, strength = 1) {
+  const s = Math.sin(cycle);
+  j.shL.rotation.x = -.8 * s * strength;
+  j.shR.rotation.x = .8 * s * strength;
+  j.elL.rotation.x = -.55;
+  j.elR.rotation.x = -.55;
+  j.hipL.rotation.x = .75 * s * strength;
+  j.hipR.rotation.x = -.75 * s * strength;
+  j.kneeL.rotation.x = .22 + .65 * Math.max(0, -s) * strength;
+  j.kneeR.rotation.x = .22 + .65 * Math.max(0, s) * strength;
+  j.ankleL.rotation.x = -.2 * s;
+  j.ankleR.rotation.x = .2 * s;
+  j.waist.rotation.y = .08 * s;
+  j.neck.rotation.z = .045 * s;
+  j.handL.rotation.z = .1 * s;
+  j.handR.rotation.z = -.1 * s;
+}
+
+function updateHero(t) {
+  const r = hero.root, j = hero.j;
+  resetPose(hero);
+  r.rotation.set(0, Math.PI / 2, 0);
+  r.position.set(5.3, 1.36, -1.35);
+
+  if (t < 2.15) {
+    const p = smooth(t / 2.15);
+    r.position.set(mix(-9.5, -6.25, p), 1.36 + .065 * Math.abs(Math.sin(t * 15)),
+      mix(-1.3, -4.38, p));
+    runPose(j, t * 15);
+    r.rotation.z = -.09;
+  } else if (t < 5.15) {
+    const p = (t - 2.15) / 3;
+    const rise = smooth(p / .12);
+    r.position.set(mix(-6.25, 1.25, p), 1.36 + 1.58 * rise, -4.38);
+    r.rotation.z = .62 * rise;
+    runPose(j, p * Math.PI * 10, 1.25);
+    j.hipL.rotation.z = -.12;
+    j.hipR.rotation.z = .12;
+    j.ankleL.rotation.x = -.4;
+    j.ankleR.rotation.x = -.4;
+    j.neck.rotation.z = -.17;
+  } else if (t < 6.88) {
+    const p = (t - 5.15) / 1.73;
+    r.position.set(mix(1.25, 4.05, p),
+      mix(2.94, 1.36, p) + 1.45 * Math.sin(Math.PI * p),
+      mix(-4.38, -1.8, p));
+    r.rotation.x = -Math.PI * 2 * smooth(p);
+    r.rotation.z = .18 * (1 - p);
+    j.hipL.rotation.x = -.7;
+    j.hipR.rotation.x = -.9;
+    j.kneeL.rotation.x = 1.15;
+    j.kneeR.rotation.x = 1.05;
+    j.shL.rotation.x = -1.7;
+    j.shR.rotation.x = -1.45;
+    j.elL.rotation.x = -.35;
+    j.elR.rotation.x = -.4;
+  } else if (t < 7.65) {
+    const p = (t - 6.88) / .77;
+    r.position.set(mix(4.05, 5.3, p), 1.36 - .72 * Math.sin(Math.PI * p), mix(-1.8, -1.35, p));
+    r.rotation.x = -Math.PI * 2 * smooth(p);
+    j.hipL.rotation.x = -.95;
+    j.hipR.rotation.x = -.8;
+    j.kneeL.rotation.x = 1.45;
+    j.kneeR.rotation.x = 1.45;
+    j.shL.rotation.x = -1.2;
+    j.shR.rotation.x = -1.2;
+    j.elL.rotation.x = -1;
+    j.elR.rotation.x = -1;
+    j.neck.rotation.x = .3;
+  } else {
+    const advance = smooth((t - 7.65) / .55);
+    r.position.x = 5.3 + .55 * advance;
+    j.hipL.rotation.x = -.12;
+    j.hipR.rotation.x = .15;
+    j.kneeL.rotation.x = .12;
+    j.kneeR.rotation.x = .16;
+    j.elL.rotation.x = -.48;
+    j.elR.rotation.x = -.48;
+    j.shL.rotation.x = -.2;
+    j.shR.rotation.x = -.25;
+
+    const jab = gauss(t, 8.3, .17);
+    j.shL.rotation.x -= 1.45 * jab;
+    j.elL.rotation.x += .3 * jab;
+    j.waist.rotation.y += .24 * jab;
+
+    const cross = gauss(t, 9.13, .2);
+    j.shR.rotation.x -= 1.55 * cross;
+    j.elR.rotation.x += .26 * cross;
+    j.waist.rotation.y -= .38 * cross;
+    r.position.x += .18 * cross;
+
+    const kick = gauss(t, 10.2, .31);
+    j.hipR.rotation.x -= 1.68 * kick;
+    j.hipR.rotation.y += .6 * kick;
+    j.kneeR.rotation.x += .36 * kick;
+    j.ankleR.rotation.x -= .22 * kick;
+    j.shL.rotation.x -= .8 * kick;
+    r.rotation.y += .7 * kick;
+    r.position.y += .2 * kick;
+    r.position.x -= .2 * kick;
+
+    if (t >= 10.65 && t < 11.85) {
+      const p = smooth((t - 10.65) / 1.2);
+      r.rotation.y += Math.PI * 2 * p;
+      j.shR.rotation.x = -1.25;
+      j.shR.rotation.z = -.7;
+      j.elR.rotation.x = -.3;
+      j.handR.rotation.z = -.35;
+      j.shL.rotation.x = -.85;
+      j.waist.rotation.y = -.3;
+      j.neck.rotation.y = .24;
+      r.position.x += .22 * Math.sin(Math.PI * p);
+    }
+
+    if (t >= 11.85 && t < 13.4) {
+      const p = smooth((t - 11.85) / 1.55);
+      const strike = smooth((p - .52) / .23);
+      r.position.x = mix(5.85, 6.28, p);
+      r.position.y = 1.36 - .54 * strike;
+      j.shR.rotation.x = mix(-2.7, -.32, strike);
+      j.elR.rotation.x = mix(-.35, -.75, strike);
+      j.handR.rotation.x = -.28;
+      j.shL.rotation.x = mix(-1.45, -.7, strike);
+      j.elL.rotation.x = -.6;
+      j.waist.rotation.x = .75 * strike;
+      j.neck.rotation.x = -.3 * strike;
+      j.hipL.rotation.x = -.5 * strike;
+      j.hipR.rotation.x = .42 * strike;
+      j.kneeL.rotation.x = 1.05 * strike;
+      j.kneeR.rotation.x = 1.22 * strike;
+    }
+    if (t >= 13.4) {
+      const p = smooth((t - 13.4) / 1.1);
+      r.position.x = 6.28;
+      r.position.y = mix(.82, 1.36, p);
+      j.waist.rotation.x = mix(.75, 0, p);
+      j.hipL.rotation.x = -.5 * (1 - p);
+      j.hipR.rotation.x = .42 * (1 - p);
+      j.kneeL.rotation.x = 1.05 * (1 - p);
+      j.kneeR.rotation.x = 1.22 * (1 - p);
+      j.shR.rotation.x = -.4 * (1 - p);
+    }
+  }
+}
+
+function updateEnemy(t) {
+  const r = enemy.root, j = enemy.j;
+  resetPose(enemy);
+  r.rotation.set(0, -Math.PI / 2, 0);
+  r.position.set(7.55, 1.27, -1.35);
+  j.shL.rotation.z = -.16;
+  j.shR.rotation.z = .16;
+  j.elL.rotation.x = -.3;
+  j.elR.rotation.x = -.3;
+
+  let recoil = 0;
+  for (const hit of [8.3, 9.13, 10.2, 11.38]) {
+    if (t >= hit) recoil += gauss(t, hit + .07, .29);
+  }
+  r.position.x += .22 * recoil + .05 * [8.3, 9.13, 10.2, 11.38].filter(v => t >= v).length;
+  r.rotation.x = -.3 * recoil;
+  j.waist.rotation.x = .35 * recoil;
+  j.neck.rotation.x = -.5 * recoil;
+  j.shL.rotation.x = -1.1 * recoil;
+  j.shR.rotation.x = -.75 * recoil;
+
+  if (t >= 12.9) {
+    const p = smooth((t - 12.9) / 1.05);
+    r.position.x = 7.75 + 1.25 * p;
+    r.position.y = 1.27 - .42 * p;
+    r.rotation.x = -1.42 * p;
+    j.waist.rotation.x = .28 * p;
+    j.neck.rotation.x = -.42 * p;
+    j.shL.rotation.x = -1.5 * p;
+    j.shR.rotation.x = -.8 * p;
+    j.hipL.rotation.x = .5 * p;
+    j.hipR.rotation.x = -.45 * p;
+    j.kneeL.rotation.x = .9 * p;
+    j.kneeR.rotation.x = .7 * p;
+  }
+}
+
+function updateEffects(t) {
+  const slash = t >= 10.76 && t <= 11.72;
+  arc.visible = slash;
+  if (slash) {
+    const p = (t - 10.76) / .96;
+    arc.position.set(hero.root.position.x, 1.75, hero.root.position.z);
+    arc.rotation.y = p * Math.PI * 2;
+    arcMaterial.opacity = Math.sin(Math.PI * p) * .75;
+  }
+
+  const impact = t - 12.9;
+  const active = impact >= 0 && impact < 1.1;
+  shock.visible = shock2.visible = active;
+  if (active) {
+    const p = impact / 1.1;
+    shock.position.set(6.5, .055, -1.35);
+    shock2.position.set(6.5, .065, -1.35);
+    shock.scale.setScalar(.2 + p * 4.2);
+    shock2.scale.setScalar(.15 + p * 3.2);
+    shockMaterial.opacity = .85 * (1 - p);
+    shock2.material.opacity = .5 * (1 - p);
+  }
+
+  for (let i = 0; i < dustCount; i++) {
+    const d = dustData[i];
+    const age = t - d.event - d.delay;
+    const k = i * 3;
+    if (age < 0 || age > 1.35) {
+      dustPositions[k + 1] = -100;
+    } else {
+      dustPositions[k] = d.x + Math.cos(d.a) * d.speed * age;
+      dustPositions[k + 1] = .05 + d.lift * age - 1.1 * age * age;
+      dustPositions[k + 2] = d.z + Math.sin(d.a) * d.speed * age;
+    }
+  }
+  dustGeometry.attributes.position.needsUpdate = true;
+}
+
+const desiredCamera = new THREE.Vector3();
+const desiredTarget = new THREE.Vector3();
+let wasClose = false;
+function updateCamera(t, dt) {
+  const close = t >= 12.08 && t < 13.32;
+  if (close) {
+    desiredCamera.set(5.15, 2.45, 2.7);
+    desiredTarget.set(6.72, 1.15, -1.35);
+  } else if (t < 7.65) {
+    desiredCamera.set(hero.root.position.x - 2.7, 4.5, 8.2);
+    desiredTarget.set(hero.root.position.x + .7, Math.max(1.45, hero.root.position.y + .35), hero.root.position.z);
+  } else {
+    desiredCamera.set(4.35, 3.6, 7.3);
+    desiredTarget.set(6.72, 1.45, -1.35);
+  }
+  if (close && !wasClose) {
+    camera.position.copy(desiredCamera);
+    cameraTarget.copy(desiredTarget);
+  } else {
+    const lag = 1 - Math.exp(-dt * (close ? 5 : 2.3));
+    camera.position.lerp(desiredCamera, lag);
+    cameraTarget.lerp(desiredTarget, lag);
+  }
+  camera.lookAt(cameraTarget);
+  wasClose = close;
+  slowEl.style.opacity = close ? '1' : '0';
+}
+
+const phases = [
+  [2.15, 'Sprint start'], [5.15, 'Wall run'], [6.88, 'Wall jump · backflip'],
+  [7.65, 'Roll landing'], [8.65, '01 · Jab'], [9.55, '02 · Cross'],
+  [10.65, '03 · Roundhouse'], [11.85, '04 · Spinning slash'],
+  [13.4, '05 · Ground slam'], [15, 'Gauntlet cleared']
+];
+const hitTimes = [8.3, 9.13, 10.2, 11.38, 12.9];
+function updateHud(t) {
+  phaseEl.textContent = phases.find(([end]) => t < end)[1];
+  counterEl.textContent = `HITS ${String(hitTimes.filter(v => t >= v).length).padStart(2, '0')} / 05`;
+  progressEl.style.width = `${t / 15 * 100}%`;
+}
+
+function resize() {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+}
+addEventListener('resize', resize);
+
+let start = performance.now();
+let last = start;
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, .08);
+  last = now;
+  const t = ((now - start) / 1000) % 15;
+  updateHero(t);
+  updateEnemy(t);
+  updateEffects(t);
+  updateCamera(t, dt);
+  updateHud(t);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

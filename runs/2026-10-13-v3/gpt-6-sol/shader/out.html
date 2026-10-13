@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Molten Forms</title>
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #060a17; }
+    canvas { display: block; width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const uniforms = {
+  uResolution: { value: new THREE.Vector2() },
+  uTime: { value: 0 },
+  uCameraPos: { value: new THREE.Vector3() },
+  uCameraTarget: { value: new THREE.Vector3() }
+};
+
+const material = new THREE.ShaderMaterial({
+  uniforms,
+  depthTest: false,
+  depthWrite: false,
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = vec4(position.xy, 0.0, 1.0);
+    }
+  `,
+  fragmentShader: `
+    precision highp float;
+
+    uniform vec2 uResolution;
+    uniform float uTime;
+    uniform vec3 uCameraPos;
+    uniform vec3 uCameraTarget;
+    varying vec2 vUv;
+
+    mat2 rotate2(float a) {
+      float c = cos(a), s = sin(a);
+      return mat2(c, -s, s, c);
+    }
+
+    float hash31(vec3 p) {
+      p = fract(p * 0.1031);
+      p += dot(p, p.yxz + 33.33);
+      return fract((p.x + p.y) * p.z);
+    }
+
+    float noise3(vec3 p) {
+      vec3 i = floor(p);
+      vec3 f = fract(p);
+      f = f * f * (3.0 - 2.0 * f);
+      return mix(
+        mix(mix(hash31(i), hash31(i + vec3(1,0,0)), f.x),
+            mix(hash31(i + vec3(0,1,0)), hash31(i + vec3(1,1,0)), f.x), f.y),
+        mix(mix(hash31(i + vec3(0,0,1)), hash31(i + vec3(1,0,1)), f.x),
+            mix(hash31(i + vec3(0,1,1)), hash31(i + vec3(1,1,1)), f.x), f.y),
+        f.z
+      );
+    }
+
+    float sdSphere(vec3 p, float r) {
+      return length(p) - r;
+    }
+
+    float sdBox(vec3 p, vec3 b) {
+      vec3 q = abs(p) - b;
+      return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+    }
+
+    float sdTorus(vec3 p, vec2 t) {
+      return length(vec2(length(p.xz) - t.x, p.y)) - t.y;
+    }
+
+    float sdCapsule(vec3 p, vec3 a, vec3 b, float r) {
+      vec3 q = p - a;
+      vec3 ba = b - a;
+      return length(q - ba * clamp(dot(q, ba) / dot(ba, ba), 0.0, 1.0)) - r;
+    }
+
+    float sdCylinder(vec3 p, vec2 h) {
+      vec2 d = abs(vec2(length(p.xz), p.y)) - h;
+      return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
+    }
+
+    float sdOctahedron(vec3 p, float s) {
+      p = abs(p);
+      return (p.x + p.y + p.z - s) * 0.57735027;
+    }
+
+    float smoothUnion(float a, float b, float k) {
+      float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+      return mix(b, a, h) - k * h * (1.0 - h);
+    }
+
+    // x is distance; y identifies floor, lava form, torus, box, capsule, cylinder, octahedron.
+    vec2 scene(vec3 p) {
+      vec2 result = vec2(p.y, 0.0);
+      float t = uTime;
+
+      vec3 q = p - vec3(0.0, 1.55 + 0.10 * sin(t * 1.1), 0.0);
+      q.xz = rotate2(t * 0.24) * q.xz;
+      float sphere = sdSphere(q - vec3(-0.17, 0.02, 0.0),
+                              1.00 + 0.15 * sin(t * 0.83));
+      vec3 qb = q - vec3(0.42 * sin(t * 0.58), -0.08, 0.18);
+      qb.xy = rotate2(0.55 + t * 0.35) * qb.xy;
+      qb.yz = rotate2(0.28) * qb.yz;
+      float box = sdBox(qb, vec3(0.68)) - 0.12
+                + 0.13 * sin(t * 0.79 + 1.1);
+      vec3 qt = q - vec3(-0.08, 0.12, -0.08);
+      qt.xy = rotate2(0.65 + t * 0.27) * qt.xy;
+      float torus = sdTorus(qt, vec2(0.92, 0.28))
+                  + 0.13 * sin(t * 0.92 + 2.0);
+      float blend = 0.29 + 0.09 * sin(t * 0.67);
+      float hero = smoothUnion(sphere, box, blend);
+      hero = smoothUnion(hero, torus, blend);
+      if (hero < result.x) result = vec2(hero, 1.0);
+
+      vec3 a = p - vec3(-2.70, 1.26 + 0.15 * sin(t * 1.2), 0.18);
+      a.xy = rotate2(0.55 + t * 0.65) * a.xy;
+      a.yz = rotate2(0.35) * a.yz;
+      float d = sdTorus(a, vec2(0.75, 0.22));
+      if (d < result.x) result = vec2(d, 2.0);
+
+      a = p - vec3(2.65, 1.22 + 0.10 * sin(t + 1.0), 0.18);
+      a.xz = rotate2(0.35 + t * 0.42) * a.xz;
+      a.yz = rotate2(0.22 + t * 0.28) * a.yz;
+      d = sdBox(a, vec3(0.67, 0.67, 0.67)) - 0.08;
+      if (d < result.x) result = vec2(d, 3.0);
+
+      a = p - vec3(-1.65, 1.34 + 0.14 * sin(t * 1.1 + 2.0), -2.62);
+      a.yz = rotate2(0.35 * sin(t * 0.8)) * a.yz;
+      a.xz = rotate2(t * 0.34) * a.xz;
+      d = sdCapsule(a, vec3(0.0, -0.63, 0.0),
+                       vec3(0.0,  0.63, 0.0), 0.37);
+      if (d < result.x) result = vec2(d, 4.0);
+
+      a = p - vec3(1.72, 1.12 + 0.13 * sin(t * 1.3 + 0.8), -2.55);
+      a.xy = rotate2(0.24 + 0.27 * sin(t * 0.6)) * a.xy;
+      a.xz = rotate2(t * 0.31) * a.xz;
+      d = sdCylinder(a, vec2(0.53, 0.71));
+      if (d < result.x) result = vec2(d, 5.0);
+
+      a = p - vec3(0.0, 1.48 + 0.20 * sin(t * 0.9 + 1.5), 2.75);
+      a.xy = rotate2(t * 0.48) * a.xy;
+      a.yz = rotate2(t * 0.36) * a.yz;
+      d = sdOctahedron(a, 1.27);
+      if (d < result.x) result = vec2(d, 6.0);
+
+      return result;
+    }
+
+    vec2 march(vec3 ro, vec3 rd, float maxDistance, int steps) {
+      float t = 0.03;
+      for (int i = 0; i < 96; i++) {
+        if (i >= steps || t > maxDistance) break;
+        vec2 h = scene(ro + rd * t);
+        if (h.x < 0.0018) return vec2(t, h.y);
+        t += clamp(h.x * 0.82, 0.012, 1.0);
+      }
+      return vec2(50.0, -1.0);
+    }
+
+    vec3 normalAt(vec3 p, float id) {
+      if (id < 0.5) return vec3(0.0, 1.0, 0.0);
+      vec3 a = vec3( 1.0, -1.0, -1.0);
+      vec3 b = vec3(-1.0, -1.0,  1.0);
+      vec3 c = vec3(-1.0,  1.0, -1.0);
+      vec3 d = vec3( 1.0,  1.0,  1.0);
+      float e = 0.002;
+      return normalize(
+        a * scene(p + a * e).x +
+        b * scene(p + b * e).x +
+        c * scene(p + c * e).x +
+        d * scene(p + d * e).x
+      );
+    }
+
+    float softShadow(vec3 ro, vec3 rd, float maxDistance) {
+      float shade = 1.0;
+      float t = 0.04;
+      for (int i = 0; i < 24; i++) {
+        float h = scene(ro + rd * t).x;
+        if (h < 0.002) return 0.16;
+        shade = min(shade, 12.0 * h / t);
+        t += clamp(h, 0.035, 0.45);
+        if (t > maxDistance) break;
+      }
+      return clamp(shade, 0.16, 1.0);
+    }
+
+    float ambientOcclusion(vec3 p, vec3 n) {
+      float occlusion = 0.0;
+      float weight = 1.0;
+      for (int i = 0; i < 4; i++) {
+        float h = 0.12 + 0.16 * float(i);
+        occlusion += max(0.0, h - scene(p + n * h).x) * weight;
+        weight *= 0.72;
+      }
+      return clamp(1.0 - occlusion * 1.4, 0.28, 1.0);
+    }
+
+    vec3 background(vec3 rd) {
+      float horizon = smoothstep(-0.35, 0.55, rd.y);
+      vec3 color = mix(vec3(0.075, 0.105, 0.17),
+                       vec3(0.006, 0.013, 0.038), horizon);
+      vec3 cell = floor(rd * 260.0);
+      vec3 within = fract(rd * 260.0) - 0.5;
+      float star = step(0.997, hash31(cell))
+                 * exp(-90.0 * dot(within, within));
+      color += vec3(0.42, 0.65, 1.0) * star;
+      float distantGlow = pow(max(dot(rd, normalize(vec3(-0.55, 0.32, -0.7))), 0.0), 18.0);
+      color += vec3(0.13, 0.055, 0.17) * distantGlow;
+      return color;
+    }
+
+    vec3 shadeSurface(vec3 p, vec3 n, vec3 rd, float id, float quality) {
+      vec3 base;
+      float metal = 0.0;
+      float emission = 0.0;
+
+      if (id < 0.5) {
+        float check = mod(floor(p.x * 0.75) + floor(p.z * 0.75), 2.0);
+        base = mix(vec3(0.025, 0.055, 0.082),
+                   vec3(0.11, 0.15, 0.19), check);
+        metal = 0.65;
+      } else if (id < 1.5) {
+        base = vec3(0.095, 0.105, 0.13);
+        float warp = noise3(p * 2.9 + vec3(0.0, uTime * 0.19, 0.0));
+        float crackA = sin(p.x * 9.0 + p.y * 5.1
+                         + sin(p.z * 6.0 + warp * 5.0) * 2.2 + warp * 6.0);
+        float crackB = sin(p.z * 8.0 + p.x * 2.7
+                         - p.y * 4.0 + warp * 7.0);
+        emission = 1.0 - smoothstep(0.035, 0.16,
+                                    min(abs(crackA), abs(crackB)));
+        emission *= 0.80 + 0.20 * sin(uTime * 3.2);
+        base = mix(base, vec3(0.35, 0.065, 0.018), emission * 0.55);
+        metal = 0.28;
+      } else if (id < 2.5) {
+        base = vec3(0.055, 0.42, 0.53);
+        metal = 0.82;
+      } else if (id < 3.5) {
+        base = vec3(0.62, 0.28, 0.16);
+        metal = 0.72;
+      } else if (id < 4.5) {
+        base = vec3(0.30, 0.19, 0.55);
+        metal = 0.45;
+      } else if (id < 5.5) {
+        base = vec3(0.68, 0.49, 0.18);
+        metal = 0.78;
+      } else {
+        base = vec3(0.13, 0.56, 0.45);
+        metal = 0.55;
+      }
+
+      vec3 lightPos = vec3(4.0, 8.0, 5.0);
+      vec3 l = normalize(lightPos - p);
+      vec3 fill = normalize(vec3(-0.65, 0.45, -0.6));
+      vec3 view = normalize(-rd);
+      float shadow = 1.0;
+      float ao = 1.0;
+      if (quality > 0.5) {
+        shadow = softShadow(p + n * 0.025, l, length(lightPos - p));
+        ao = ambientOcclusion(p, n);
+      }
+
+      float diffuse = max(dot(n, l), 0.0);
+      float fillDiffuse = max(dot(n, fill), 0.0);
+      vec3 halfVector = normalize(l + view);
+      float specular = pow(max(dot(n, halfVector), 0.0), mix(22.0, 72.0, metal));
+      float fillSpec = pow(max(dot(n, normalize(fill + view)), 0.0), 38.0);
+
+      vec3 color = base * (
+        vec3(0.11, 0.16, 0.24) * ao +
+        vec3(1.65, 1.42, 1.25) * diffuse * shadow +
+        vec3(0.20, 0.48, 0.83) * fillDiffuse
+      );
+      color += vec3(1.9, 1.65, 1.35) * specular * shadow * (0.22 + metal * 0.62);
+      color += vec3(0.16, 0.48, 0.88) * fillSpec * (0.12 + metal * 0.2);
+
+      if (id > 0.5) {
+        float rim = pow(1.0 - max(dot(view, n), 0.0), 3.0);
+        vec3 rimColor = id < 1.5 ? vec3(1.0, 0.22, 0.035)
+                                 : vec3(0.12, 0.48, 0.95);
+        color += rimColor * rim * 0.62;
+      }
+      color += vec3(2.8, 0.42, 0.025) * emission;
+      return color;
+    }
+
+    vec3 floatingSparks(vec3 ro, vec3 rd, float hitDistance) {
+      vec3 glow = vec3(0.0);
+      for (int i = 0; i < 4; i++) {
+        float depth = 3.5 + float(i) * 3.1;
+        vec3 p = ro + rd * depth;
+        p.y += uTime * (0.12 + float(i) * 0.045);
+        vec3 cell = floor(p * 1.5);
+        vec3 local = fract(p * 1.5) - 0.5;
+        float seed = hash31(cell + vec3(float(i) * 17.0));
+        float spark = step(0.974, seed)
+                    * exp(-85.0 * dot(local, local))
+                    * step(depth, hitDistance);
+        glow += mix(vec3(0.18, 0.47, 1.0),
+                    vec3(1.0, 0.39, 0.08), step(0.5, seed))
+              * spark * 1.7;
+      }
+      return glow;
+    }
+
+    vec3 filmic(vec3 x) {
+      return clamp((x * (2.51 * x + 0.03)) /
+                   (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+    }
+
+    void main() {
+      vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
+      vec3 forward = normalize(uCameraTarget - uCameraPos);
+      vec3 right = normalize(cross(forward, vec3(0.0, 1.0, 0.0)));
+      vec3 up = cross(right, forward);
+      vec3 rd = normalize(uv.x * right + uv.y * up + 1.7 * forward);
+      vec3 ro = uCameraPos;
+
+      vec2 hit = march(ro, rd, 46.0, 92);
+      vec3 color = background(rd);
+
+      if (hit.y >= 0.0) {
+        vec3 p = ro + rd * hit.x;
+        vec3 n = normalAt(p, hit.y);
+        color = shadeSurface(p, n, rd, hit.y, 1.0);
+
+        // A second ray supplies one reflection bounce; its hit is shaded without recursion.
+        vec3 reflectedRay = reflect(rd, n);
+        vec2 reflectedHit = march(p + n * 0.025, reflectedRay, 36.0, 52);
+        vec3 reflection = background(reflectedRay);
+        if (reflectedHit.y >= 0.0) {
+          vec3 rp = p + n * 0.025 + reflectedRay * reflectedHit.x;
+          vec3 rn = normalAt(rp, reflectedHit.y);
+          reflection = shadeSurface(rp, rn, reflectedRay, reflectedHit.y, 0.0);
+          float reflectedFog = 1.0 - exp(-0.012 * reflectedHit.x * reflectedHit.x);
+          reflection = mix(reflection, background(reflectedRay), reflectedFog);
+        }
+
+        float fresnel = pow(1.0 - max(dot(-rd, n), 0.0), 5.0);
+        float reflectivity = hit.y < 0.5
+          ? 0.35 + 0.35 * fresnel
+          : 0.12 + 0.48 * fresnel;
+        color = mix(color, reflection, reflectivity);
+
+        float fog = 1.0 - exp(-0.011 * hit.x * hit.x);
+        color = mix(color, background(rd), fog);
+      }
+
+      color += floatingSparks(ro, rd, hit.x);
+      float vignette = pow(clamp(
+        16.0 * vUv.x * vUv.y * (1.0 - vUv.x) * (1.0 - vUv.y),
+        0.0, 1.0), 0.24);
+      color *= mix(0.48, 1.0, vignette);
+      color = pow(filmic(color), vec3(1.0 / 2.2));
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `
+});
+
+const renderer = new THREE.WebGLRenderer({
+  antialias: false,
+  alpha: false,
+  powerPreference: 'high-performance'
+});
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+const screenCamera = new THREE.Camera();
+
+const cameraPath = new THREE.CatmullRomCurve3([
+  new THREE.Vector3(7.3, 3.3, 7.8),
+  new THREE.Vector3(8.4, 2.2, 1.2),
+  new THREE.Vector3(5.5, 1.65, -5.8),
+  new THREE.Vector3(0.3, 5.4, -9.3),
+  new THREE.Vector3(-6.4, 3.0, -7.0),
+  new THREE.Vector3(-7.4, 1.65, -0.8),
+  new THREE.Vector3(-5.3, 3.1, 6.4),
+  new THREE.Vector3(0.1, 5.8, 9.0)
+], true, 'centripetal');
+
+const targetPath = new THREE.CatmullRomCurve3([
+  new THREE.Vector3(0.0, 1.35, 0.0),
+  new THREE.Vector3(0.2, 1.2, -0.1),
+  new THREE.Vector3(0.1, 1.55, -0.2),
+  new THREE.Vector3(0.0, 1.45, 0.0),
+  new THREE.Vector3(-0.2, 1.3, 0.0),
+  new THREE.Vector3(0.0, 1.5, 0.2),
+  new THREE.Vector3(0.0, 1.35, 0.1),
+  new THREE.Vector3(0.0, 1.5, 0.0)
+], true, 'centripetal');
+
+function resize() {
+  const width = Math.max(1, window.innerWidth);
+  const height = Math.max(1, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1, 1600 / width, 900 / height));
+  renderer.setSize(width, height, false);
+  renderer.getDrawingBufferSize(uniforms.uResolution.value);
+}
+
+window.addEventListener('resize', resize);
+resize();
+
+const clock = new THREE.Clock();
+function animate() {
+  const time = clock.getElapsedTime();
+  const phase = (time / 42) % 1;
+  cameraPath.getPointAt(phase, uniforms.uCameraPos.value);
+  targetPath.getPointAt(phase, uniforms.uCameraTarget.value);
+  uniforms.uTime.value = time;
+  renderer.render(scene, screenCamera);
+  requestAnimationFrame(animate);
+}
+animate();
+</script>
+</body>
+</html>

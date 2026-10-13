@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Parkour-Combat Gauntlet</title>
+<style>
+html,body{margin:0;padding:0;overflow:hidden;background:#0b0e18;height:100%;font-family:system-ui,Arial,sans-serif}
+canvas{display:block}
+#ui{position:fixed;inset:0;pointer-events:none;color:#fff;text-shadow:0 2px 10px #000}
+#phase{position:absolute;top:20px;left:22px;font-size:34px;font-weight:900;letter-spacing:2px;text-transform:uppercase}
+#sub{position:absolute;top:62px;left:24px;font-size:14px;opacity:.85;letter-spacing:1px}
+#hits{position:absolute;top:20px;right:24px;font-size:30px;font-weight:900;text-align:right;color:#ffd84d}
+#hits small{display:block;font-size:12px;color:#fff;letter-spacing:2px}
+#barw{position:absolute;left:22px;right:22px;bottom:20px;height:8px;background:rgba(255,255,255,.18);border-radius:99px;overflow:hidden}
+#bar{height:100%;width:0%;background:linear-gradient(90deg,#00e5ff,#ff2fb3,#ffd84d)}
+#slow{position:absolute;top:86px;right:24px;font-size:14px;font-weight:800;color:#8ef7ff;opacity:0;letter-spacing:2px}
+</style></head><body>
+<div id="ui"><div id="phase">SPRINT</div><div id="sub">PARKOUR-COMBAT GAUNTLET &bull; 15s LOOP</div>
+<div id="hits">0 / 5<small>HIT COUNTER</small></div><div id="slow">&#9679; SLOW-MOTION CLOSE-UP</div>
+<div id="barw"><div id="bar"></div></div></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.appendChild(renderer.domElement);
+
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x11172a);
+scene.fog=new THREE.Fog(0x11172a,22,58);
+const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,200);
+camera.position.set(-7,4,-10);
+
+scene.add(new THREE.HemisphereLight(0xbdd8ff,0x302018,.75));
+const sun=new THREE.DirectionalLight(0xffffff,2.4);
+sun.position.set(8,16,6);sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-20;sun.shadow.camera.right=20;
+sun.shadow.camera.top=24;sun.shadow.camera.bottom=-24;sun.shadow.camera.far=50;sun.shadow.bias=-0.0004;sun.shadow.radius=4;
+scene.add(sun);
+const rimC=new THREE.PointLight(0x00e5ff,90,30,1.8);rimC.position.set(-7,4,4);scene.add(rimC);
+const rimM=new THREE.PointLight(0xff2fb3,80,30,1.8);rimM.position.set(7,3,12);scene.add(rimM);
+const rimY=new THREE.PointLight(0xffb300,45,24,1.8);rimY.position.set(0,5,-12);scene.add(rimY);
+
+function canvasTex(draw,w=512,h=512){const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.colorSpace=THREE.SRGBColorSpace;return t;}
+const floorTex=canvasTex((g,w,h)=>{const s=w/4;for(let y=0;y<4;y++)for(let x=0;x<4;x++){g.fillStyle=(x+y)%2?'#26304a':'#d7dce8';g.fillRect(x*s,y*s,s,s);}g.strokeStyle='rgba(0,0,0,.25)';for(let i=0;i<=4;i++){g.beginPath();g.moveTo(i*s,0);g.lineTo(i*s,h);g.stroke();g.beginPath();g.moveTo(0,i*s);g.lineTo(w,i*s);g.stroke();}});
+floorTex.repeat.set(8,10);
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(24,44),new THREE.MeshStandardMaterial({map:floorTex,roughness:.85}));
+floor.rotation.x=-Math.PI/2;floor.position.z=2;floor.receiveShadow=true;scene.add(floor);
+
+// scuff decals
+const scuffMat=new THREE.MeshBasicMaterial({color:0x0a0a0a,transparent:true,opacity:.32,depthWrite:false});
+for(let i=0;i<46;i++){const p=new THREE.Mesh(new THREE.PlaneGeometry(.35+Math.random()*1.1,.08+Math.random()*.2),scuffMat);p.rotation.x=-Math.PI/2;p.rotation.z=Math.random()*Math.PI;p.position.set((Math.random()-.5)*18,.012,-14+Math.random()*34);scene.add(p);}
+
+// striped tall wall (right, used for wall-run)
+const stripeTex=canvasTex((g,w,h)=>{for(let i=0;i<10;i++){g.fillStyle=i%2?'#e53935':'#f5f5f5';g.fillRect(0,i*h/10,w,h/10);}g.fillStyle='rgba(0,0,0,.18)';for(let i=0;i<40;i++)g.fillRect(Math.random()*w,Math.random()*h,3,16);});
+stripeTex.repeat.set(4,1);
+const wallMat=new THREE.MeshStandardMaterial({map:stripeTex,roughness:.7});
+const tallWall=new THREE.Mesh(new THREE.BoxGeometry(.5,6.5,15),wallMat);
+tallWall.position.set(3.45,3.25,1);tallWall.castShadow=tallWall.receiveShadow=true;scene.add(tallWall);
+const wallCap=new THREE.Mesh(new THREE.BoxGeometry(.8,.3,15.4),new THREE.MeshStandardMaterial({color:0xffd84d}));
+wallCap.position.set(3.45,6.65,1);wallCap.castShadow=true;scene.add(wallCap);
+
+// arena walls
+const conc=new THREE.MeshStandardMaterial({color:0x3a4666,roughness:.9});
+function box(w,h,d,x,y,z,m=conc){const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);o.position.set(x,y,z);o.castShadow=o.receiveShadow=true;scene.add(o);return o;}
+box(.5,2.2,44,-6,1.1,2); box(24,2.2,.5,0,1.1,-16); box(24,2.2,.5,0,1.1,20); box(.5,2.2,10,6,1.1,15); box(.5,2.2,10,6,1.1,-11);
+
+// crowd-free stands (empty tiered seating)
+const seatCols=[0x1976d2,0xd32f2f,0xfbc02d,0x388e3c];
+for(let tier=0;tier<4;tier++){
+  box(34,1,1.6,0,2.6+tier*1.05,-19-tier*1.5);
+  box(1.6,1,32,-9.5-tier*1.5,2.6+tier*1.05,2);
+  box(34,1,1.6,0,2.6+tier*1.05,23+tier*1.5);
+  for(let i=0;i<18;i++){
+    const m=new THREE.MeshStandardMaterial({color:seatCols[(i+tier)%4],roughness:.8});
+    const s=new THREE.Mesh(new THREE.BoxGeometry(1.2,.45,.5),m);s.position.set(-13+i*1.55,3.35+tier*1.05,-19-tier*1.5);scene.add(s);
+    const s2=s.clone();s2.position.set(-13+i*1.55,3.35+tier*1.05,23+tier*1.5);scene.add(s2);
+  }
+}
+// floodlight poles
+for(const [x,z] of [[-8,-14],[8,-14],[-8,18],[8,18]]){box(.22,7,.22,x,3.5,z,new THREE.MeshStandardMaterial({color:0x222831}));const lamp=new THREE.Mesh(new THREE.BoxGeometry(1.2,.4,.3),new THREE.MeshBasicMaterial({color:0xfff6c9}));lamp.position.set(x,7.1,z);scene.add(lamp);}
+
+// ---------- articulated fighter factory ----------
+function mat(c,r=.65){return new THREE.MeshStandardMaterial({color:c,roughness:r,metalness:.08});}
+function limb(len,r,c){ // pivot at top, extends down -Y
+  const g=new THREE.Group();const m=new THREE.Mesh(new THREE.CapsuleGeometry(r,len,4,10),mat(c));m.position.y=-len/2;g.add(m);return g;}
+function fighter(suit,accent,skin){
+  const root=new THREE.Group();
+  const pelvis=new THREE.Group();pelvis.position.y=.98;root.add(pelvis);
+  const pm=new THREE.Mesh(new THREE.BoxGeometry(.38,.24,.24),mat(suit));pelvis.add(pm);
+  const belt=new THREE.Mesh(new THREE.BoxGeometry(.42,.09,.28),mat(accent));belt.position.y=.08;pelvis.add(belt);
+  const torso=new THREE.Group();torso.position.y=.13;pelvis.add(torso);
+  const tm=new THREE.Mesh(new THREE.BoxGeometry(.46,.62,.27),mat(suit));tm.position.y=.31;torso.add(tm);
+  const chest=new THREE.Mesh(new THREE.BoxGeometry(.48,.2,.3),mat(accent));chest.position.y=.45;torso.add(chest);
+  const head=new THREE.Group();head.position.y=.68;torso.add(head);
+  const hm=new THREE.Mesh(new THREE.SphereGeometry(.17,20,16),mat(skin,.5));hm.position.y=.14;head.add(hm);
+  const visor=new THREE.Mesh(new THREE.BoxGeometry(.26,.07,.05),new THREE.MeshBasicMaterial({color:0x00e5ff}));visor.position.set(0,.15,.15);head.add(visor);
+  const band=new THREE.Mesh(new THREE.TorusGeometry(.17,.028,8,20),mat(accent));band.rotation.x=Math.PI/2;band.position.y=.21;head.add(band);
+  function arm(side){
+    const sh=new THREE.Group();sh.position.set(.29*side,.56,0);torso.add(sh);
+    const pad=new THREE.Mesh(new THREE.SphereGeometry(.1,12,10),mat(accent));sh.add(pad);
+    sh.add(limb(.3,.065,suit));
+    const el=new THREE.Group();el.position.y=-.34;sh.add(el);
+    el.add(new THREE.Mesh(new THREE.SphereGeometry(.065,10,8),mat(skin,.5)));
+    el.add(limb(.26,.055,skin));
+    const hand=new THREE.Group();hand.position.y=-.3;el.add(hand);
+    const glove=new THREE.Mesh(new THREE.SphereGeometry(.085,12,10),mat(accent,.5));hand.add(glove);
+    return{sh,el,hand};
+  }
+  function leg(side){
+    const hip=new THREE.Group();hip.position.set(.14*side,-.06,0);pelvis.add(hip);
+    hip.add(limb(.4,.085,suit));
+    const knee=new THREE.Group();knee.position.y=-.44;hip.add(knee);
+    knee.add(new THREE.Mesh(new THREE.SphereGeometry(.075,10,8),mat(accent)));
+    knee.add(limb(.38,.065,suit));
+    const foot=new THREE.Group();foot.position.y=-.42;knee.add(foot);
+    const fm=new THREE.Mesh(new THREE.BoxGeometry(.11,.08,.27),mat(accent,.5));fm.position.set(0,-.03,.06);foot.add(fm);
+    return{hip,knee,foot};
+  }
+  const aL=arm(-1),aR=arm(1),lL=leg(-1),lR=leg(1);
+  root.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=false;}});
+  scene.add(root);
+  return{root,pelvis,torso,head,shL:aL.sh,elL:aL.el,handL:aL.hand,shR:aR.sh,elR:aR.el,handR:aR.hand,
+          hipL:lL.hip,kneeL:lL.knee,footL:lL.foot,hipR:lR.hip,kneeR:lR.knee,footR:lR.foot};
+}
+const H=fighter(0x1565c0,0xffd84d,0xe8b08a);           // hero
+const D=fighter(0xb71c1c,0xeeeeee,0xd7a35f);           // enemy dummy
+D.root.rotation.y=Math.PI;
+
+// weapon in hero right hand
+const sword=new THREE.Group();H.handR.add(sword);
+const grip=new THREE.Mesh(new THREE.CylinderGeometry(.025,.025,.18,8),mat(0x222222));sword.add(grip);
+const blade=new THREE.Mesh(new THREE.BoxGeometry(.035,.85,.09),new THREE.MeshStandardMaterial({color:0xdff8ff,metalness:.9,roughness:.15,emissive:0x225566}));
+blade.position.y=-.5;sword.add(blade);
+const guard=new THREE.Mesh(new THREE.BoxGeometry(.16,.03,.12),mat(0xffd84d));guard.position.y=-.08;sword.add(guard);
+sword.traverse(o=>{if(o.isMesh)o.castShadow=true;});
+
+// weapon arc trail (slash)
+const arcMat=new THREE.MeshBasicMaterial({color:0x6ff6ff,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false});
+const arc=new THREE.Mesh(new THREE.TorusGeometry(1.25,.11,8,40,2.4),arcMat);scene.add(arc);
+const arc2=new THREE.Mesh(new THREE.RingGeometry(.7,1.45,32,1,0,2.2),new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false}));scene.add(arc2);
+
+// shockwave ring (slam)
+const ringMat=new THREE.MeshBasicMaterial({color:0xffd84d,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false});
+const ring=new THREE.Mesh(new THREE.RingGeometry(.85,1,48),ringMat);ring.rotation.x=-Math.PI/2;ring.position.y=.03;scene.add(ring);
+const ring2=new THREE.Mesh(new THREE.RingGeometry(.9,1,48),new THREE.MeshBasicMaterial({color:0xff7043,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false}));
+ring2.rotation.x=-Math.PI/2;ring2.position.y=.04;scene.add(ring2);
+
+// dust particles
+const PN=420,pPos=new Float32Array(PN*3),pVel=new Float32Array(PN*3),pLife=new Float32Array(PN);
+const pGeo=new THREE.BufferGeometry();pGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3));
+const dust=new THREE.Points(pGeo,new THREE.PointsMaterial({color:0xd8c9a8,size:.13,transparent:true,opacity:.85,depthWrite:false}));
+scene.add(dust);let pNext=0;
+function burst(x,y,z,n=36,spread=2.4,up=2.2){
+  for(let i=0;i<n;i++){const k=pNext;pNext=(pNext+1)%PN;
+    pPos[k*3]=x;pPos[k*3+1]=y;pPos[k*3+2]=z;const a=Math.random()*Math.PI*2,r=(0.3+Math.random())*spread;
+    pVel[k*3]=Math.cos(a)*r;pVel[k*3+1]=Math.random()*up;pVel[k*3+2]=Math.sin(a)*r;pLife[k]=.6+Math.random()*.7;}
+}
+function stepDust(dt){for(let k=0;k<PN;k++){if(pLife[k]>0){pLife[k]-=dt;pVel[k*3+1]-=1.2*dt;pPos[k*3]+=pVel[k*3]*dt;pPos[k*3+1]=Math.max(.03,pPos[k*3+1]+pVel[k*3+1]*dt);pPos[k*3+2]+=pVel[k*3+2]*dt;}else pPos[k*3+1]=-5;}pGeo.attributes.position.needsUpdate=true;}
+
+// ---------- helpers ----------
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const u01=(t,a,b)=>clamp((t-a)/(b-a),0,1);
+const ss=u=>u*u*(3-2*u), lerp=(a,b,u)=>a+(b-a)*u;
+const easeOut=u=>1-Math.pow(1-u,3), easeIn=u=>u*u*u;
+const pulse=(t,c,w)=>Math.exp(-Math.pow((t-c)/w,2)); // gaussian bump
+
+// ---------- poses (every joint set every frame) ----------
+function basePose(F,t){
+  F.pelvis.rotation.set(0,Math.sin(t*1.7)*.04,0);F.torso.rotation.set(.05,0,0);
+  F.head.rotation.set(0,Math.sin(t*.9)*.08,0);
+  F.shL.rotation.set(.08,0,.14);F.shR.rotation.set(.08,0,-.14);
+  F.elL.rotation.set(-.25,0,0);F.elR.rotation.set(-.25,0,0);
+  F.handL.rotation.set(Math.sin(t*3)*.15,0,0);F.handR.rotation.set(Math.cos(t*3)*.15,0,0);
+  F.hipL.rotation.set(0,0,.04);F.hipR.rotation.set(0,0,-.04);
+  F.kneeL.rotation.x=.08;F.kneeR.rotation.x=.08;F.footL.rotation.x=-.05;F.footR.rotation.x=-.05;
+  F.pelvis.position.y=.98+Math.sin(t*2)*.015;
+}
+function runPose(F,ph,lean=.28,amp=1){
+  const s=Math.sin(ph),c=Math.cos(ph);
+  F.torso.rotation.set(lean,s*.12,0);F.pelvis.rotation.y=s*.08;F.head.rotation.set(-lean*.6,-s*.1,0);
+  F.hipL.rotation.x=s*1.05*amp;F.hipR.rotation.x=-s*1.05*amp;
+  F.kneeL.rotation.x=Math.max(.1,-c)*1.5*amp+.15;F.kneeR.rotation.x=Math.max(.1,c)*1.5*amp+.15;
+  F.footL.rotation.x=-s*.6;F.footR.rotation.x=s*.6;
+  F.shL.rotation.x=-s*.95*amp;F.shR.rotation.x=s*.95*amp;F.shL.rotation.z=.18;F.shR.rotation.z=-.18;
+  F.elL.rotation.x=-1.15-Math.max(0,-s)*.5;F.elR.rotation.x=-1.15-Math.max(0,s)*.5;
+  F.handL.rotation.x=s*.4;F.handR.rotation.x=-s*.4;
+  F.pelvis.position.y=.98+Math.abs(c)*.07;
+}
+function tuckPose(F,amt){
+  F.torso.rotation.x=.7*amt;F.head.rotation.x=.5*amt;
+  F.hipL.rotation.x=-1.9*amt;F.hipR.rotation.x=-1.9*amt;
+  F.kneeL.rotation.x=2.2*amt;F.kneeR.rotation.x=2.2*amt;F.footL.rotation.x=F.footR.rotation.x=.8*amt;
+  F.shL.rotation.x=-1.6*amt;F.shR.rotation.x=-1.6*amt;F.elL.rotation.x=-2*amt;F.elR.rotation.x=-2*amt;
+  F.handL.rotation.x=-.6*amt;F.handR.rotation.x=-.6*amt;F.pelvis.position.y=.98-.25*amt;
+}
+function crouchPose(F,amt,t){
+  F.torso.rotation.x=.55*amt;F.head.rotation.x=-.35*amt;F.pelvis.position.y=.98-.42*amt;
+  F.hipL.rotation.x=-1.7*amt;F.hipR.rotation.x=-1.5*amt;F.kneeL.rotation.x=2*amt;F.kneeR.rotation.x=1.9*amt;
+  F.footL.rotation.x=-.4*amt;F.footR.rotation.x=-.3*amt;
+  F.shL.rotation.x=-.7*amt;F.shR.rotation.x=-.5*amt;F.elL.rotation.x=-.5*amt;F.elR.rotation.x=-.4*amt;
+  F.handL.rotation.x=Math.sin(t*4)*.1;F.handR.rotation.x=-.3*amt;
+}
+function guardPose(F,t){ // fighting stance
+  const b=Math.sin(t*5)*.03;F.pelvis.position.y=.9+b;F.torso.rotation.set(.16,.25,0);F.head.rotation.set(0,-.2,0);
+  F.hipL.rotation.x=-.45;F.hipR.rotation.x=.35;F.kneeL.rotation.x=.65;F.kneeR.rotation.x=.55;
+  F.footL.rotation.x=.15;F.footR.rotation.x=-.25;F.hipL.rotation.z=.12;F.hipR.rotation.z=-.12;
+  F.shL.rotation.set(-.9,0,.35);F.shR.rotation.set(-.8,0,-.3);
+  F.elL.rotation.x=-1.9;F.elR.rotation.x=-2;F.handL.rotation.x=-.4;F.handR.rotation.x=-.4;
+}
+
+// ---------- timeline ----------
+const DUR=15, HIT_T=[8.05,8.85,9.75,10.75,11.85];
+const phaseEl=document.getElementById('phase'),hitsEl=document.getElementById('hits'),
+      barEl=document.getElementById('bar'),slowEl=document.getElementById('slow');
+function phaseName(t){
+  if(t<2)return'SPRINT START'; if(t<5)return'WALL-RUN'; if(t<6.2)return'WALL-JUMP BACKFLIP';
+  if(t<7.4)return'ROLL LANDING'; if(t<7.9)return'CROUCH \u2192 ENGAGE';
+  if(t<8.4)return'HIT 1 \u2014 JAB'; if(t<9.2)return'HIT 2 \u2014 CROSS';
+  if(t<10.2)return'HIT 3 \u2014 ROUNDHOUSE KICK'; if(t<11.2)return'HIT 4 \u2014 SPINNING SLASH';
+  if(t<12.4)return'HIT 5 \u2014 GROUND SLAM'; return'DUMMY DOWN \u2014 RESET';
+}
+
+let simT=0,prevT=0,camCut=false;
+const camTarget=new THREE.Vector3(0,1,-8),camPos=new THREE.Vector3(-7,4,-10);
+const clock=new THREE.Clock();
+
+function crossed(t,p,c){return p<c&&t>=c;}
+
+function animateHero(t){
+  const F=H;let x=0,y=0,z=0,ry=0,rx=0,rz=0;
+  basePose(F,t);
+  if(t<2){ // sprint
+    const u=easeOut(u01(t,0,2));z=lerp(-13,-3,u);runPose(F,t*11,.32,1);
+  } else if(t<5){ // wall-run: tilt, feet on wall x=3.45, 6 steps
+    const u=u01(t,2,5),enter=ss(u01(t,2,2.6)),exit=ss(u01(t,4.6,5));
+    x=lerp(0,2.25,enter);y=lerp(0,1.45,enter)-exit*.25;z=lerp(-3,5,u);
+    rz=-0.95*enter; // body tilted toward wall, feet planted on it
+    runPose(F,t*10.5,.15,.95);
+    F.hipL.rotation.z=.55;F.hipR.rotation.z=.55; // legs angled to wall surface
+    F.footL.rotation.z=.8;F.footR.rotation.z=.8;
+    F.shR.rotation.z=-1.1;F.elR.rotation.x=-.4; // trailing hand near wall
+    F.head.rotation.z=.55;
+  } else if(t<6.2){ // wall-jump + backflip
+    const u=u01(t,5,6.2);x=lerp(2.25,.1,ss(u));z=lerp(5,9,u);
+    y=lerp(1.2,0,ss(u))+Math.sin(u*Math.PI)*1.5;
+    rx=-Math.PI*2*easeOut(u);rz=-.95*(1-ss(u01(t,5,5.5)));
+    tuckPose(F,Math.sin(Math.min(u*1.15,1)*Math.PI));
+    if(u>.75){const k=u01(t,5.95,6.2);F.hipL.rotation.x=lerp(F.hipL.rotation.x,-.3,k);F.hipR.rotation.x=lerp(F.hipR.rotation.x,-.2,k);F.kneeL.rotation.x=lerp(F.kneeL.rotation.x,.6,k);F.kneeR.rotation.x=lerp(F.kneeR.rotation.x,.5,k);}
+  } else if(t<7.4){ // roll landing
+    const u=u01(t,6.2,7.4);z=lerp(9,11.3,ss(u));x=.1;
+    rx=Math.PI*2*u; tuckPose(F,Math.sin(u*Math.PI)*.95+.15);F.pelvis.position.y=.62;
+  } else if(t<7.9){ // crouch then rise to guard
+    const u=u01(t,7.4,7.9);z=11.35;x=.1;crouchPose(F,1-ss(u)*.55,t);
+    if(u>.5){const k=u01(t,7.65,7.9);guardPose(F,t);F.pelvis.position.y=lerp(.68,.9,k);}
+  } else if(t<12.4){ // ---- 5-hit combo ----
+    x=.1;z=11.45+u01(t,7.9,11.2)*.55;guardPose(F,t);
+    if(t<8.4){ // jab (left)
+      const p=pulse(t,8.05,.13);
+      F.shL.rotation.x=lerp(-.9,-1.62,p);F.elL.rotation.x=lerp(-1.9,-.08,p);F.handL.rotation.x=-.2;
+      F.torso.rotation.y=.25+.4*p;F.pelvis.position.y=.9-.04*p;z+=.22*p;
+    } else if(t<9.2){ // cross (right)
+      const p=pulse(t,8.85,.14);
+      F.shR.rotation.x=lerp(-.8,-1.62,p);F.elR.rotation.x=lerp(-2,-.05,p);F.handR.rotation.x=-.2;
+      F.torso.rotation.y=.25-.55*p;F.head.rotation.y=.3*p;z+=.3*p;
+    } else if(t<10.2){ // roundhouse kick (spin + right leg)
+      const u=u01(t,9.2,10.2),p=pulse(t,9.75,.16);
+      ry=Math.PI*2*ss(u01(t,9.35,9.95));
+      F.hipR.rotation.x=lerp(.35,-1.55,p);F.hipR.rotation.z=lerp(-.12,-.55,p);
+      F.kneeR.rotation.x=lerp(.55,.12,p);F.footR.rotation.x=-.8*p;
+      F.shL.rotation.x=-1.4*p;F.shR.rotation.x=1.1*p;F.torso.rotation.z=-.3*p;F.pelvis.position.y=.9+.12*p;
+    } else if(t<11.2){ // spinning slash
+      const u=u01(t,10.2,11.2),p=ss(u01(t,10.35,10.65))*(1-ss(u01(t,10.9,11.2)));
+      ry=Math.PI*2*ss(u01(t,10.3,11.0));
+      F.shR.rotation.set(-.2,0,lerp(-.3,-1.65,p));F.elR.rotation.x=lerp(-2,-.05,p);F.handR.rotation.z=.4*p;
+      F.shL.rotation.z=lerp(.35,1.2,p);F.torso.rotation.x=.16+.15*p;F.pelvis.position.y=.9+.18*Math.sin(u*Math.PI);
+      F.hipL.rotation.x=-.7*p;F.kneeL.rotation.x=.9*p;F.hipR.rotation.x=.5*p;
+    } else { // ground slam: leap then fist down
+      const u=u01(t,11.2,12.4);
+      if(t<11.85){y=Math.sin(u01(t,11.2,11.85)*Math.PI)*1.15;
+        F.shR.rotation.x=-2.9;F.elR.rotation.x=-.3;F.shL.rotation.x=-2.4;F.elL.rotation.x=-.5;
+        F.hipL.rotation.x=-1;F.hipR.rotation.x=-.6;F.kneeL.rotation.x=1.4;F.kneeR.rotation.x=1.1;F.torso.rotation.x=-.15;}
+      else{const k=easeOut(u01(t,11.85,12.05));y=0;crouchPose(F,k,t);
+        F.shR.rotation.x=lerp(-2.9,-.35,k);F.elR.rotation.x=-.15;F.shL.rotation.x=lerp(-2.4,-.5,k);
+        F.torso.rotation.x=.75*k;F.pelvis.position.y=.55;}
+    }
+  } else { // victory idle, weapon lowered
+    x=.1;z=12;const u=ss(u01(t,12.4,13));crouchPose(F,(1-u)*.8,t);
+    guardPose(F,t);F.shR.rotation.x=-.3;F.elR.rotation.x=-.6;F.head.rotation.y=Math.sin(t)*.15;F.pelvis.position.y=.92+Math.sin(t*2)*.02;
+  }
+  F.root.position.set(x,y,z);F.root.rotation.set(rx,ry,rz);
+  return F.root.position;
+}
+
+function animateDummy(t){
+  const F=D;basePose(F,t*.8);
+  let kb=0,lean=0,twist=0,flail=0;
+  HIT_T.forEach((ht,i)=>{ if(t>=ht){const age=t-ht;const rec=Math.exp(-age*4.5)*Math.cos(age*10);
+    kb+= (i<4? .34 : .55); lean+=rec*(0.35+i*0.06); twist+=rec*(i%2? -.4:.35); flail+=Math.exp(-age*3.5);} });
+  const collapse=ss(u01(t,12.0,12.7));
+  F.root.position.set(.1, -collapse*.82, 13.35+kb*(1-collapse*.25));
+  F.root.rotation.set(-lean*.7-collapse*1.52, Math.PI+twist*.5, lean*.25);
+  F.torso.rotation.set(-lean,-twist,0);F.head.rotation.set(-lean*.8,twist*.6,lean*.4);
+  F.shL.rotation.set(-.3-flail*1.6,0,.3+flail*1.3+collapse*.8);
+  F.shR.rotation.set(-.3-flail*1.4,0,-.3-flail*1.3-collapse*.8);
+  F.elL.rotation.x=-.3-flail*.9-collapse*.4;F.elR.rotation.x=-.3-flail*1.1-collapse*.3;
+  F.handL.rotation.x=flail;F.handR.rotation.x=-flail;
+  F.hipL.rotation.x=lean*.5-collapse*.25;F.hipR.rotation.x=-lean*.4+collapse*.3;
+  F.kneeL.rotation.x=.15+flail*.7+collapse*.5;F.kneeR.rotation.x=.15+flail*.5+collapse*.15;
+  F.footL.rotation.x=flail*.5;F.footR.rotation.x=-flail*.5;
+  F.pelvis.position.y=.98-collapse*.1+Math.sin(Math.min(flail,1)*3)*.03;
+}
+
+function animateFX(t,heroPos){
+  // slash arc trail
+  const slash=ss(u01(t,10.3,10.55))*(1-ss(u01(t,10.85,11.15)));
+  arcMat.opacity=slash*.9;arc2.material.opacity=slash*.55;
+  if(slash>0){
+    const spin=Math.PI*2*ss(u01(t,10.3,11.0));
+    arc.position.set(heroPos.x,1.25,heroPos.z);arc.rotation.set(Math.PI/2,0,spin+1.2);
+    arc.scale.setScalar(1+slash*.25);
+    arc2.position.copy(arc.position);arc2.rotation.set(-Math.PI/2,0,-spin);
+  }
+  // shockwave
+  const su=u01(t,11.85,12.7);
+  if(su>0&&su<1){
+    ring.position.set(heroPos.x,.03,heroPos.z+.35);ring.scale.setScalar(1+easeOut(su)*9);ringMat.opacity=(1-su)*.95;
+    const s2=u01(t,11.92,12.55);ring2.position.copy(ring.position);ring2.position.y=.045;
+    ring2.scale.setScalar(1+easeOut(s2)*6);ring2.material.opacity=(1-s2)*.8;
+  } else {ringMat.opacity=0;ring2.material.opacity=0;}
+  // timed dust bursts (previous-frame crossing)
+  if(crossed(t,prevT,5.0))burst(2.9,1.6,5,26,1.4,1.4);          // wall-jump push-off
+  if(crossed(t,prevT,6.2))burst(.1,.15,9,44,2.8,2);             // backflip landing
+  if(crossed(t,prevT,7.0))burst(.1,.15,10.6,20,1.6,1.2);        // mid-roll
+  if(crossed(t,prevT,9.75))burst(.1,.2,12.4,14,1.2,1);          // kick plant
+  if(crossed(t,prevT,11.85))burst(heroPos.x,.12,heroPos.z+.3,80,4.4,2.6); // slam
+  if(crossed(t,prevT,12.55))burst(.1,.15,15,34,2.4,1.6);        // dummy hits floor
+  HIT_T.slice(0,4).forEach(ht=>{if(crossed(t,prevT,ht))burst(.1,1.2,13.2,10,1,1);});
+  // wall-run footstep puffs
+  if(t>2.2&&t<5&&Math.sin(t*10.5)>0.96)burst(3.1,heroPos.y+.4,heroPos.z,3,.5,.4);
+}
+
+function animateCamera(t,heroPos,dt){
+  const slam=t>=11.0&&t<12.45;
+  slowEl.style.opacity=slam?1:0;
+  if(slam){
+    if(!camCut){camCut=true; // HARD CUT to close-up
+      camPos.set(heroPos.x+2.1,1.15,heroPos.z+2.6);camTarget.set(heroPos.x,1,heroPos.z);}
+    camPos.x+= (heroPos.x+1.8-camPos.x)*dt*1.2;
+    camPos.y+= (1.0+ (t>11.85?-.15:.25)-camPos.y)*dt*2;
+    camPos.z+= (heroPos.z+2.3-camPos.z)*dt*1.2;
+    camTarget.lerp(new THREE.Vector3(heroPos.x,.85,heroPos.z+.3),dt*5);
+    camera.position.copy(camPos);camera.lookAt(camTarget);
+    camera.fov+= (38-camera.fov)*dt*6;camera.updateProjectionMatrix();
+  } else {
+    if(camCut)camCut=false;
+    const desired=new THREE.Vector3(heroPos.x-5.8,3.1+heroPos.y*.45,heroPos.z-6.2);
+    camPos.lerp(desired,1-Math.pow(.0018,dt)); // smooth follow with lag
+    camTarget.lerp(new THREE.Vector3(heroPos.x,1.15+heroPos.y,heroPos.z+.6),1-Math.pow(.0005,dt));
+    camera.position.copy(camPos);camera.lookAt(camTarget);
+    camera.fov+= (55-camera.fov)*dt*4;camera.updateProjectionMatrix();
+  }
+}
+
+let lastHits=-1;
+function tick(){
+  requestAnimationFrame(tick);
+  const rawDt=Math.min(clock.getDelta(),.05);
+  const slow=(simT>=11.0&&simT<12.45)? .32 : 1;   // slow-motion on slam
+  const dt=rawDt*slow;
+  prevT=simT;simT+=dt;
+  if(simT>=DUR){simT-=DUR;prevT=simT;}             // reset & loop
+  const t=simT;
+
+  const heroPos=animateHero(t);
+  animateDummy(t);
+  animateFX(t,heroPos);
+  stepDust(rawDt);
+  animateCamera(t,heroPos,rawDt);
+
+  rimC.position.x=-7+Math.sin(t*.7)*1.5;rimM.intensity=75+Math.sin(t*3)*15;
+
+  phaseEl.textContent=phaseName(t);
+  const hits=HIT_T.filter(h=>t>=h).length;
+  if(hits!==lastHits){lastHits=hits;hitsEl.innerHTML=hits+' / 5<small>HIT COUNTER</small>';
+    hitsEl.style.transform='scale(1.25)';setTimeout(()=>hitsEl.style.transform='scale(1)',120);}
+  barEl.style.width=(t/DUR*100)+'%';
+
+  renderer.render(scene,camera);
+}
+tick();
+
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+</script></body></html>

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Clockwork Orrery Automaton</title><link rel="icon" href="data:,">
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#0a0807}canvas{display:block}</style></head><body>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+const PI=Math.PI,TAU=2*PI,frac=x=>x-Math.floor(x),cl=x=>Math.max(-1,Math.min(1,x)),V=(x,y,z)=>new THREE.Vector3(x,y,z),V2=(x,y)=>new THREE.Vector2(x,y);
+const R=new THREE.WebGLRenderer({antialias:true});R.setPixelRatio(Math.min(devicePixelRatio,2));R.setSize(innerWidth,innerHeight);
+R.toneMapping=THREE.ACESFilmicToneMapping;R.toneMappingExposure=1.05;R.shadowMap.enabled=true;R.shadowMap.type=THREE.PCFSoftShadowMap;document.body.appendChild(R.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x0a0807);
+const cam=new THREE.PerspectiveCamera(35,innerWidth/innerHeight,.1,100);
+const es=new THREE.Scene();es.add(new THREE.Mesh(new THREE.BoxGeometry(20,20,20),new THREE.MeshBasicMaterial({color:0x120e0b,side:THREE.BackSide})));
+for(const[c,w,h,p]of[[[9,8,6],8,5,[-5,7,6]],[[1.6,2.3,3.6],3,9,[8,1,-4]],[[4,2.4,1.1],6,3,[6,-3,5]],[[2,1.8,1.6],10,2,[0,9,-3]]]){const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({color:new THREE.Color(...c),side:THREE.DoubleSide}));m.position.set(...p);m.lookAt(0,0,0);es.add(m)}
+scene.environment=new THREE.PMREMGenerator(R).fromScene(es,.03).texture;
+const sun=new THREE.DirectionalLight(0xffe2b8,3),sh=sun.shadow;sun.position.set(-4,7,8);sun.castShadow=true;sh.mapSize.set(2048,2048);
+Object.assign(sh.camera,{left:-7,right:7,top:7,bottom:-7,near:1,far:30});sh.camera.updateProjectionMatrix();sh.bias=-.0004;sh.normalBias=.02;
+const rim=new THREE.DirectionalLight(0x8fb0ff,1.2);rim.position.set(6,3,-5);scene.add(sun,rim,new THREE.HemisphereLight(0xfff0dd,0x201810,.35));
+const M=(c,m,r,o={})=>new THREE.MeshStandardMaterial({color:c,metalness:m,roughness:r,...o});
+const brass=M(0xd4af5a,1,.28),steel=M(0xc8ccd2,1,.22),dsteel=M(0x8a8f96,1,.32),blued=M(0x22325e,.9,.3),dark=M(0x1a1410,.5,.55),copper=M(0xc07a4e,1,.3),tin=M(0xa8402c,.45,.45),bev=M(0xd4af5a,1,.3,{flatShading:true});
+const add=(g,m,p=[0,0,0],par=scene)=>{const o=new THREE.Mesh(g,m);o.position.set(...p);par.add(o);return o};
+const cyl=(r,h,s=16)=>new THREE.CylinderGeometry(r,r,h,s),zc=(g,m,p,par)=>{const o=add(g,m,p,par);o.rotation.x=PI/2;return o};
+const Yv=V(0,1,0);function rod(o,a,b){o.position.copy(a).add(b).multiplyScalar(.5);const d=b.clone().sub(a);o.scale.set(1,d.length(),1);o.quaternion.setFromUnitVectors(Yv,d.normalize())}
+const arb=new Set(),arbor=(x,y)=>{const k=Math.round(x*50)+'_'+Math.round(y*50);if(!arb.has(k)){arb.add(k);zc(cyl(.028,1.1,10),steel,[x,y,.05])}};
+function gearGeo(z,m,t,saw){const r=m*z/2,ro=r+m,ri=r-1.25*m,p=TAU/z,s=new THREE.Shape(),P=[];
+for(let i=0;i<z;i++){const a=i*p;saw?P.push([ri,a-.04*p],[ro,a],[ri,a+.62*p]):P.push([ri,a-.3*p],[ro,a-.12*p],[ro,a+.12*p],[ri,a+.3*p])}
+P.forEach(([q,a],i)=>s[i?'lineTo':'moveTo'](q*Math.cos(a),q*Math.sin(a)));
+if(z>=20){const n=z>40?6:5,Ro=ri-.1*r-.02,Ri=Math.max(.06,.28*r),w=.07*r+.012;for(let j=0;j<n;j++){const a0=j*TAU/n,a1=a0+TAU/n,h=new THREE.Path();h.absarc(0,0,Ro,a0+w/Ro,a1-w/Ro,false);h.absarc(0,0,Ri,a1-w/Ri,a0+w/Ri,true);s.holes.push(h)}}
+const g=new THREE.ExtrudeGeometry(s,{depth:t,bevelEnabled:!saw,bevelThickness:.006,bevelSize:.004,bevelSegments:1,curveSegments:8});g.translate(0,0,-t/2);return g}
+function camGeo(f,n=240){const s=new THREE.Shape();for(let i=0;i<n;i++){const a=i/n*TAU,r=f(a);s[i?'lineTo':'moveTo'](r*Math.cos(a),r*Math.sin(a))}
+s.holes.push(new THREE.Path().absarc(0,0,.04,0,TAU,true));const g=new THREE.ExtrudeGeometry(s,{depth:.07,bevelEnabled:false,curveSegments:16});g.translate(0,0,-.035);return g}
+const gears=[],ang=(g,s)=>g.k*s+g.b;
+function gear(p,z,m,o={}){let x=o.x||0,y=o.y||0,k=o.k||0,b=o.b||0;
+if(p&&o.co){x=p.x;y=p.y;k=p.k;b=o.b??p.b}else if(p){const d=o.d*PI/180,q=p.z/z,D=m*(p.z+z)/2;x=p.x+D*Math.cos(d);y=p.y+D*Math.sin(d);k=-q*p.k;b=-q*p.b+d*(1+q)+PI-PI/z}
+const ms=add(gearGeo(z,m,o.t||.06,o.saw),o.mat||(z<20?steel:brass),[x,y,o.zp||0],o.g);if(!o.g)arbor(x,y);
+const g={x,y,z,k,b,ms};gears.push(g);return g}
+const g1=gear(null,80,.035,{k:-TAU/3600,zp:-.12}),g2=gear(g1,8,.035,{d:105,zp:-.12}),g3=gear(g2,48,.04,{co:1,zp:.08}),
+g4=gear(g3,8,.04,{d:Math.acos(-g3.x/1.12)*180/PI,zp:.08}),g5=gear(g4,30,.052,{co:1,b:PI/4,saw:1,zp:.26,t:.04}),
+mT=Math.hypot(g4.x,g4.y)/80,t1=gear(g4,40,mT,{co:1,zp:-.36}),t2=gear(t1,40,mT,{d:-90,zp:-.36}),t3=gear(t2,40,mT,{d:-90,zp:-.36}),
+g9=gear(g1,12,.04,{co:1,zp:.32}),g10=gear(g9,36,.04,{d:-35,zp:.32}),g11=gear(g10,10,.0384,{co:1,zp:.44}),g12=gear(g11,40,.0384,{d:145,zp:.44});
+const row=s=>{let a=gear(t3,20,mT,{d:s,zp:-.36});a=gear(a,40,mT,{d:s,zp:-.36});return gear(a,20,mT,{d:s,zp:-.36})};
+const L3=row(180),R3=row(0);
+const O=new THREE.Group();O.position.set(0,4.2,.16);scene.add(O);const Og=new THREE.Group();Og.rotation.x=-PI/2;O.add(Og);
+const oL=gear(null,24,.03,{k:-2*g5.k,y:-.54,zp:.06,g:Og}),oS=gear(oL,12,.03,{co:1,zp:-.02,g:Og}),oA=gear(oL,12,.03,{d:90,zp:.06,g:Og}),oB=gear(oS,24,.03,{d:90,zp:-.02,g:Og});
+add(cyl(.45,.04,40),dark,[0,-.1,0],O);add(cyl(.025,.6,10),steel,[0,.2,0],O);add(cyl(.02,.2,8),steel,[0,0,.54],O);
+const arm=(len,h,mat,pr)=>{const a=new THREE.Group();a.position.y=h;O.add(a);add(cyl(.012,len,8),steel,[len/2,0,0],a).rotation.z=PI/2;add(new THREE.SphereGeometry(pr,24,16),mat,[len,0,0],a);return a};
+const aA=arm(.75,.16,M(0x3a6fd0,.3,.35),.09),aB=arm(1.3,.26,copper,.12);
+add(new THREE.SphereGeometry(.2,32,16),M(0xffb347,0,.4,{emissive:0xff9a2a,emissiveIntensity:2.5}),[0,.5,0],O);
+const sl=new THREE.PointLight(0xffb060,4,0,2);sl.position.set(0,.5,0);O.add(sl);
+const bH=new THREE.Group();bH.position.set(0,g4.y,.62);scene.add(bH);zc(new THREE.CylinderGeometry(.06,.11,.08,14),bev,[0,0,0],bH);
+const bV=add(new THREE.CylinderGeometry(.11,.06,.08,14),bev,[0,g4.y+.1,.7]);
+add(cyl(.022,4.26-g4.y-.14,8),steel,[0,(4.26+g4.y+.14)/2,.7]);
+add(new THREE.BoxGeometry(7.2,6.6,.06),dark,[0,.75,-.85]);add(new THREE.BoxGeometry(7,.08,1.5),M(0x3a2c1c,.8,.4),[0,4.06,-.1]);
+add(new THREE.PlaneGeometry(60,40),M(0x15110e,0,.9),[0,0,-1.6]);
+const fr=new THREE.Shape([V2(-3.5,-2.55),V2(3.5,-2.55),V2(3.5,4.02),V2(-3.5,4.02)]);fr.holes.push(new THREE.Path([V2(-3.3,-2.35),V2(3.3,-2.35),V2(3.3,3.82),V2(-3.3,3.82)]));
+add(new THREE.ExtrudeGeometry(fr,{depth:.06,bevelThickness:.015,bevelSize:.015,bevelSegments:2}),brass,[0,0,.56]);
+for(const[x,y]of[[-3.4,-2.45],[3.4,-2.45],[-3.4,3.92],[3.4,3.92]]){zc(cyl(.1,1.4,20),brass,[x,y,-.15]);for(const z of[-.65,.35])add(new THREE.TorusGeometry(.11,.03,8,24),brass,[x,y,z])}
+const cv=document.createElement('canvas');cv.width=cv.height=1024;const c=cv.getContext('2d');
+c.fillStyle='#efe4c8';c.fillRect(0,0,1024,1024);c.translate(512,512);c.fillStyle=c.strokeStyle='#2a1e14';
+for(let i=0;i<60;i++){c.save();c.rotate(i*PI/30);c.lineWidth=i%5?3:8;c.beginPath();c.moveTo(0,-505);c.lineTo(0,i%5?-486:-472);c.stroke();c.restore()}
+c.lineWidth=2;for(const r of[466,392]){c.beginPath();c.arc(0,0,r,0,TAU);c.stroke()}
+c.font='600 62px Georgia,serif';c.textAlign='center';c.textBaseline='middle';
+'XII I II III IIII V VI VII VIII IX X XI'.split(' ').forEach((t,i)=>{c.save();c.rotate(i*PI/6);c.fillText(t,0,-428);c.restore()});
+const dt=new THREE.CanvasTexture(cv);dt.colorSpace=THREE.SRGBColorSpace;dt.anisotropy=8;
+add(new THREE.RingGeometry(1.42,1.9,128),M(0xffffff,0,.55,{map:dt}),[0,0,.62]);
+for(const r of[1.42,1.92])add(new THREE.TorusGeometry(r,.03,10,128),brass,[0,0,.63]);
+const hand=(L,w,tl,z,mat)=>add(new THREE.ExtrudeGeometry(new THREE.Shape([V2(-w,-tl),V2(w,-tl),V2(w*.6,L*.7),V2(0,L),V2(-w*.6,L*.7)]),{depth:.015,bevelEnabled:false}),mat,[0,0,z]);
+const hH=hand(1,.05,.15,.7,blued),hM=hand(1.45,.035,.18,.74,blued),hS=hand(1.6,.012,.4,.78,M(0xb02a20,.6,.35));
+add(new THREE.SphereGeometry(.07,16,12),brass,[0,0,.8]).scale.z=.5;
+const Ay=g4.y+1,an=new THREE.Group();an.position.set(0,Ay,.3);scene.add(an);zc(cyl(.09,.1,20),steel,[0,0,0],an);
+for(const s of[-1,1]){const p=V(s*.523,-.477,0),r=new THREE.Mesh(cyl(.035,1,8),steel);rod(r,V(0,0,0),p);an.add(r);add(new THREE.BoxGeometry(.06,.18,.12),M(0xa01828,.1,.15),[p.x-s*.014,p.y-.014,0],an).rotation.z=-s*PI/4}
+const pe=new THREE.Group();pe.position.set(0,Ay,-.66);scene.add(pe);add(cyl(.025,6.9,10),steel,[0,-3.45,0],pe);add(new THREE.SphereGeometry(.42,40,24),brass,[0,-6.9,0],pe).scale.z=.3;
+zc(cyl(.03,1,10),steel,[0,Ay,-.2]);
+const fH=a=>.26+.14*frac(-Math.sign(L3.k)*6*a/TAU),fW=a=>.26+.07*(.5-.5*Math.cos(15*a));
+const cH=add(camGeo(fH),dsteel,[L3.x,L3.y,.46]),cW=add(camGeo(fW),dsteel,[R3.x,R3.y,.46]),cpH=PI/2-ang(L3,4.5),cpW=PI/2-ang(R3,0);
+const Ph=V(-2.35,.55,.5),lv=new THREE.Group();lv.position.copy(Ph);scene.add(lv);arbor(Ph.x,Ph.y);
+const ft=V(L3.x-Ph.x,.26+.045-Ph.y,0),b0=Math.atan2(ft.y,ft.x),lr=new THREE.Mesh(cyl(.025,1,8),brass);rod(lr,V(0,0,0),ft);lv.add(lr);
+zc(cyl(.045,.06,16),steel,ft.toArray(),lv);add(cyl(.022,1.4,8),brass,[0,.7,0],lv);add(new THREE.SphereGeometry(.08,20,14),steel,[0,1.4,0],lv);zc(cyl(.06,.1,16),steel,[0,0,0],lv);
+const bl=new THREE.Group();bl.position.set(-2.85,2.55,.5);scene.add(bl);
+add(new THREE.LatheGeometry([[0,0],[.1,0],[.13,-.08],[.2,-.3],[.3,-.5],[.42,-.6],[.43,-.64],[.38,-.62]].map(([x,y])=>V2(x,y)),48),M(0xc9a24a,1,.22,{side:THREE.DoubleSide}),[0,0,0],bl);
+add(cyl(.02,1.5,8),steel,[-2.85,3.3,.5]);
+const fl=add(new THREE.TorusGeometry(.5,.025,8,64),new THREE.MeshBasicMaterial({color:0xffd890,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false}),[-2.85,2.2,.5]);
+const fL=new THREE.PointLight(0xffc870,0,0,2);fL.position.set(-2.6,2.1,1.1);scene.add(fL);
+add(new THREE.BoxGeometry(1,.06,.18),dark,[R3.x,1.12,.58]);
+const pg=new THREE.Group();pg.position.set(R3.x,0,.44);scene.add(pg);zc(cyl(.03,.05,16),steel,[0,.03,0],pg);add(cyl(.018,1.21,8),steel,[0,.635,0],pg);add(new THREE.BoxGeometry(.18,.03,.04),steel,[0,1.24,0],pg);
+const H=V(R3.x,1.55,.58),fig=new THREE.Group();fig.position.copy(H);scene.add(fig);
+const leg=(z,s)=>{const g=new THREE.Group();g.position.z=z;fig.add(g);add(new THREE.CapsuleGeometry(.035,.3,4,8),blued,[0,-.2,0],g);add(new THREE.BoxGeometry(.11,.04,.06),dark,[-.03,-.39,0],g);add(new THREE.BoxGeometry(.08,.02,.02),steel,[s*.04,0,0],g);add(new THREE.SphereGeometry(.018,8,6),steel,[s*.06,0,0],g);return g};
+const lA=leg(.04,1),lB=leg(-.04,-1),up=new THREE.Group();fig.add(up);
+add(new THREE.CapsuleGeometry(.07,.16,4,10),tin,[0,.16,0],up);const skin=M(0xe8c8a0,.1,.5);add(new THREE.SphereGeometry(.065,16,12),skin,[0,.36,0],up);add(new THREE.SphereGeometry(.016,8,6),skin,[-.066,.36,0],up);
+add(cyl(.05,.08,12),dark,[0,.44,0],up);add(cyl(.08,.01,16),dark,[0,.405,0],up);
+const arm2=z=>{const g=new THREE.Group();g.position.set(0,.27,z);up.add(g);add(new THREE.CapsuleGeometry(.025,.18,4,8),tin,[0,-.11,0],g);return g};
+const aL=arm2(.09),aR=arm2(-.09),k1m=add(cyl(.012,1,6),steel),k2m=add(cyl(.012,1,6),steel);
+scene.traverse(o=>{if(o.isMesh)o.castShadow=o.receiveShadow=!o.material.transparent});
+const N=300,dp=new Float32Array(N*3),db=[];for(let i=0;i<N;i++)db.push([Math.random()*10-5,Math.random()*10,Math.random()*5-2,.03+Math.random()*.06,Math.random()*TAU]);
+const dg=new THREE.BufferGeometry();dg.setAttribute('position',new THREE.BufferAttribute(dp,3));
+const sp=document.createElement('canvas');sp.width=sp.height=64;const sx=sp.getContext('2d'),gr=sx.createRadialGradient(32,32,0,32,32,32);gr.addColorStop(0,'rgba(255,240,210,1)');gr.addColorStop(1,'rgba(255,240,210,0)');sx.fillStyle=gr;sx.fillRect(0,0,64,64);
+const dust=new THREE.Points(dg,new THREE.PointsMaterial({size:.04,map:new THREE.CanvasTexture(sp),transparent:true,opacity:.6,depthWrite:false,blending:THREE.AdditiveBlending,color:0xffe0b0}));dust.frustumCulled=false;scene.add(dust);
+const TG=V(0,.6,0),d0=new Date(),t0=(d0.getHours()%12)*3600+d0.getMinutes()*60+d0.getSeconds()+d0.getMilliseconds()/1e3,p0=performance.now(),TH0=PI*t0;
+addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();R.setSize(innerWidth,innerHeight)});
+R.setAnimationLoop(()=>{
+const TH=PI*(t0+(performance.now()-p0)/1e3),u=TH/PI,t=(TH-TH0)/PI,n=Math.floor(u),f=u-n,S=n+(f<.32?1-(1-f/.32)**3:1),ph=.07*Math.sin(TH);
+for(const g of gears)g.ms.rotation.z=ang(g,S);
+an.rotation.z=pe.rotation.z=ph;hS.rotation.z=-S*TAU/60;hM.rotation.z=-S*TAU/3600;hH.rotation.z=-S*TAU/43200;
+const aH=ang(L3,S)+cpH,aW=ang(R3,S)+cpW,tau=5*frac((u-4-.066)/5);cH.rotation.z=aH;cW.rotation.z=aW;
+lv.rotation.z=Math.atan2(fH(PI/2-aH)+.045-Ph.y,L3.x-Ph.x)-b0-.06*Math.exp(-8*tau)*Math.abs(Math.sin(18*tau));
+bl.rotation.z=.12*Math.exp(-3*tau)*Math.sin(45*tau);fl.scale.setScalar(1+2.5*tau);fl.material.opacity=Math.max(0,1-tau/.7);fL.intensity=25*Math.exp(-8*tau);
+const rw=fW(PI/2-aW),al=Math.asin(cl((rw-.295)/.06)),fy=H.y-.39*(1-Math.cos(al)),ca=.06*Math.cos(al),sa=.06*Math.sin(al);
+pg.position.y=rw;fig.position.y=fy;lA.rotation.z=al;lB.rotation.z=-al;aL.rotation.z=-.7*al;aR.rotation.z=.7*al;
+rod(k1m,V(H.x+.07,rw+1.24,.44),V(H.x+ca,fy+sa,H.z+.04));rod(k2m,V(H.x-.07,rw+1.24,.44),V(H.x-ca,fy+sa,H.z-.04));
+aA.rotation.y=ang(oA,S);aB.rotation.y=ang(oB,S);bH.rotation.z=ang(g5,S);bV.rotation.y=ang(oL,S);
+for(let i=0;i<N;i++){const b=db[i];dp[i*3]=b[0]+.15*Math.sin(.3*t+b[4]);dp[i*3+1]=-4+(b[1]+t*b[3])%10;dp[i*3+2]=b[2]+.1*Math.cos(.2*t+b[4])}dg.attributes.position.needsUpdate=true;
+const Rd=(15+4*Math.exp(-t/40))*Math.max(1,.9/cam.aspect),az=.2*Math.sin(.08*t),el=.12+.06*Math.sin(.05*t);
+cam.position.set(TG.x+Rd*Math.sin(az)*Math.cos(el),TG.y+Rd*Math.sin(el),TG.z+Rd*Math.cos(az)*Math.cos(el));cam.lookAt(TG);
+R.render(scene,cam)});
+</script></body></html>

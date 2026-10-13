@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EXTREME Rube-Goldberg</title><link rel="icon" href="data:,">
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#0d1320;font-family:system-ui,sans-serif}
+canvas{display:block}
+#hud{position:fixed;top:12px;left:0;right:0;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;pointer-events:none}
+.s{padding:6px 12px;border-radius:16px;background:#ffffff12;color:#7d8799;font-size:13px;border:1px solid #ffffff26;transition:.25s}
+.s.on{background:#ffb02e;color:#1a1000;box-shadow:0 0 18px #ffb02e;border-color:#ffd27a}
+#f{position:fixed;inset:0;background:#000;pointer-events:none}
+#tm{position:fixed;bottom:10px;right:14px;color:#8a94a6;font:12px monospace}
+</style></head><body><div id="hud"></div><div id="f"></div><div id="tm"></div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+// Ogni moto è funzione pura del tempo di loop t: niente motore fisico, contatti e tempi calcolati a priori
+const PI=Math.PI,g=9.8,E=Math.exp,V=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
+const R=new THREE.WebGLRenderer({antialias:true});
+R.setPixelRatio(Math.min(devicePixelRatio,2));R.setSize(innerWidth,innerHeight);
+R.shadowMap.enabled=true;R.toneMapping=THREE.ACESFilmicToneMapping;R.toneMappingExposure=1.1;
+document.body.appendChild(R.domElement);
+const S=new THREE.Scene();S.background=new THREE.Color(0x0d1320);S.fog=new THREE.Fog(0x0d1320,25,70);
+const C=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,.1,200);
+addEventListener('resize',()=>{C.aspect=innerWidth/innerHeight;C.updateProjectionMatrix();R.setSize(innerWidth,innerHeight)});
+S.add(new THREE.HemisphereLight(0xbcd0ff,0x252030,1.1));
+const DL=new THREE.DirectionalLight(0xfff2e0,2.4);DL.position.set(-5,22,12);DL.castShadow=true;
+DL.shadow.mapSize.set(2048,2048);DL.shadow.bias=-4e-4;DL.shadow.normalBias=.02;
+Object.assign(DL.shadow.camera,{left:-24,right:24,top:16,bottom:-16,near:1,far:70});DL.shadow.camera.updateProjectionMatrix();S.add(DL);
+const M=(c,o)=>new THREE.MeshStandardMaterial({color:c,roughness:.55,metalness:.1,...o});
+const B=(a,b,c)=>new THREE.BoxGeometry(a,b,c),CY=(a,b,l,n=16,o)=>new THREE.CylinderGeometry(a,b,l,n,1,o);
+function mk(geo,mat,x=0,y=0,z=0,p=S){const o=new THREE.Mesh(geo,mat);o.position.set(x,y,z);o.castShadow=o.receiveShadow=true;p.add(o);return o}
+const G=(x=0,y=0,z=0)=>{const o=new THREE.Group();o.position.set(x,y,z);S.add(o);return o};
+const cv=(w,f)=>{const c=document.createElement('canvas');c.width=c.height=w;f(c.getContext('2d'));return new THREE.CanvasTexture(c)};
+const dustTex=cv(64,x=>{const r=x.createRadialGradient(32,32,0,32,32,32);r.addColorStop(0,'#fff');r.addColorStop(1,'rgba(255,255,255,0)');x.fillStyle=r;x.fillRect(0,0,64,64)});
+const spr=(c,add)=>new THREE.Sprite(new THREE.SpriteMaterial({map:dustTex,color:c,transparent:true,depthWrite:false,blending:add?THREE.AdditiveBlending:THREE.NormalBlending}));
+mk(new THREE.PlaneGeometry(240,240),M(0x161d2b,{roughness:.95})).rotation.x=-PI/2;
+const gh=new THREE.GridHelper(240,240,0x2a3550,0x1b2335);gh.position.y=.003;S.add(gh);
+
+// 1 · domino: tronco a S, splitter largo, due bracci, ponte, coda
+const TOP=3.4,h=.8,th=.12,d=.45,dt0=.14,rm=.16,r2=.13,tHit=Math.asin((d-th)/h),alpha=2*tHit/dt0/dt0;
+mk(B(18.2,TOP,6.4),M(0x3b3346),-13.5,TOP/2,0);
+const doms=[],cr=a=>new THREE.CatmullRomCurve3(a.map(q=>V(q[0],TOP,q[1])),false,'centripetal');
+function dom(p,f,w){f.y=0;f.normalize();const gr=G();gr.position.copy(p).addScaledVector(f,th/2);gr.rotation.set(0,Math.atan2(f.x,f.z),0,'YXZ');
+mk(B(w,h,th),M(new THREE.Color().setHSL(doms.length/52,.8,.55)),0,h/2,-th/2,gr);doms.push({gr,p,f,n:[],ts:-1,a:0});return doms.length-1}
+function chain(c,n,s0,prev,wl=.4){const L=c.getLength();for(let k=0;k<n;k++){const u=Math.min(1,(s0+k*d)/L),i=dom(c.getPointAt(u),c.getTangentAt(u),k==n-1?wl:.4);if(prev>=0)doms[prev].n.push(i);prev=i}return prev}
+const tc=cr([[-20.7,1.7],[-19.4,2],[-18,1.1],[-16.9,-.4],[-15.5,-1.3],[-14,-.9],[-13.1,-.05],[-12.5,0]]),TL=tc.getLength(),nT=Math.floor(TL/d)+1;
+const split=chain(tc,nT,TL-(nT-1)*d,-1,1.1);
+const ends=[1,-1].map(sg=>{const a=[];for(let k=0;k<=8;k++){const v=k/8;a.push([-12.05+4*v,sg*(.35+.9*Math.sin(PI*v)**2)])}const c=cr(a);return chain(c,Math.floor(c.getLength()/d)+1,0,split)});
+const bx=doms[ends[0]].p.x+d;let last=dom(V(bx,TOP,0),V(1,0,0),1.1);ends.forEach(e=>doms[e].n.push(last));
+for(let k=1;k<6;k++){const i=dom(V(bx+k*d,TOP,0),V(1,0,0),.4);doms[last].n.push(i);last=i}
+// ogni pezzo parte quando il precedente lo tocca; il ponte prende il più tardo dei due bracci
+doms[0].ts=.35;doms.forEach(D=>D.n.forEach(j=>doms[j].ts=Math.max(doms[j].ts,D.ts+dt0)));
+const DLa=doms[last],f0=doms[0].f,p0=doms[0].p;
+const PS=p0.clone().addScaledVector(f0,-1.9).setY(TOP+1.1),PE0=p0.clone().addScaledVector(f0,-.29).setY(TOP+.55);
+const ramp=mk(B(.3,.05,1.75),M(0x7a8494));ramp.position.lerpVectors(PS,PE0,.5).y-=.2;ramp.lookAt(PE0.x,PE0.y-.2,PE0.z);
+mk(B(.2,.9,.2),M(0x556070),PS.x,TOP+.45,PS.z);
+const pusher=mk(new THREE.SphereGeometry(.2,20,14),M(0xeeeeee,{metalness:.8,roughness:.2}));
+
+// 2 · torre: imbuto a spirale + elica a due binari
+const AX=-3,AZ=.75;
+mk(CY(1.2,.2,.9,40,true),M(0x66ccff,{transparent:true,opacity:.35,side:THREE.DoubleSide,roughness:.15}),AX,2.75,AZ).castShadow=false;
+mk(new THREE.TorusGeometry(1.2,.035,6,40),M(0x9fdcff),AX,3.2,AZ).rotation.x=PI/2;
+for(const a of[PI/2,-PI/3,7*PI/6])mk(B(.1,3.2,.1),M(0x556070),AX+1.3*Math.cos(a),1.6,AZ+1.3*Math.sin(a));
+mk(CY(.06,.06,1.7,8),M(0x556070),AX,.85,AZ);
+const ch=mk(B(.34,.04,1.45),M(0x8c7a5b));ch.position.set(-3.7,3.24,-.12);ch.lookAt(-3,3.055,-.25);
+const D0=rm*(1+Math.sin(.6))/Math.cos(.6),M0=V(DLa.p.x+th/2+D0,TOP+rm,0);
+const mp=[M0,V(-4.4,TOP+rm,0),V(-3.7,3.42,-.17)];
+for(let k=0;k<=24;k++){const q=k/24,a=-PI/2+q*4*PI,r=1-q*.85;mp.push(V(AX+r*Math.cos(a),2.335+.9*r,AZ+r*Math.sin(a)))}
+mp.push(V(AX+.05,2.12,AZ));
+const hp=(k,r,dy)=>{const a=k/12*1.5*PI;return V(AX+r*Math.cos(a),1.82-.42*k/12-dy,AZ+r*Math.sin(a))};
+for(let k=0;k<=12;k++)mp.push(hp(k,.75,0));mp.push(V(-2.4,1.36,0));
+for(const o of[-.1,.1]){const a=[];for(let k=0;k<=12;k++)a.push(hp(k,.75+o,.17));a.push(V(-2.4,1.19,-o));mk(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(a),90,.035,6),M(0xd0a040,{metalness:.7,roughness:.3}))}
+const mc=new THREE.CatmullRomCurve3(mp,false,'centripetal');mc.arcLengthDivisions=3000;
+const marble=mk(new THREE.SphereGeometry(rm,24,16),M(0x9fc4ff,{metalness:.9,roughness:.15}));
+
+// 3 · bilico
+const SP=.45,RZ=.22,Tf=.22,see=G(0,SP,0);
+mk(B(3.6,.1,.6),M(0xc0392b),0,0,0,see);mk(B(.06,.22,.6),M(0x999999),1.78,.14,0,see);
+mk(new THREE.ConeGeometry(.35,SP-.05,4),M(0x667788),0,(SP-.05)/2,0);
+const sw=(x,y,a,o=V())=>o.set(x*Math.cos(a)-y*Math.sin(a),SP+x*Math.sin(a)+y*Math.cos(a),0);
+const ball2=mk(new THREE.SphereGeometry(r2,20,14),M(0xff8a1e,{metalness:.3,roughness:.3}));
+const tMar=DLa.ts+dt0*Math.sqrt(.6/tHit),ML=mc.getLength(),Tm=4.2,v0=2.5,am=2*(ML-v0*Tm)/Tm/Tm,vE=v0+am*Tm;
+const PE=mc.getPointAt(1),TE=mc.getTangentAt(1),A=sw(-1.55,.05+rm,-RZ),Th=(A.x-PE.x)/(vE*TE.x);
+const hv=V(vE*TE.x,(A.y-PE.y+g*Th*Th/2)/Th,(A.z-PE.z)/Th),tSee=tMar+Tm+Th,tL=tSee+Tf;
+
+// 4-5 · martello a pendolo e pila di blocchi
+const HX=4.6,HY=6.4,HL=2.6,ham=G(HX,HY,0);
+mk(B(.08,HL-.27,.08),M(0x8a5a2b),0,(.27-HL)/2,0,ham);mk(B(.8,.55,.55),M(0x5a6270,{metalness:.7,roughness:.35}),0,-HL,0,ham);
+for(const z of[-.75,.75])mk(B(.12,6.5,.12),M(0x445566),HX,3.25,z);
+mk(B(.15,.15,1.65),M(0x445566),HX,HY,0);
+// la pallina 2 arriva all'apice esattamente sulla faccia sinistra della testa ferma
+const B1=sw(1.55,.05+r2,RZ),AP=V(HX-.4-r2,HY-HL,0),vyB=Math.sqrt(2*g*(AP.y-B1.y)),TB=vyB/g,vxB=(AP.x-B1.x)/TB,tHam=tL+TB;
+const uG=(1+Math.sqrt(1+2*g*(AP.y-r2)))/g;
+// pendolo integrato una volta a 600 Hz; all'urto con la pila perde il 65% della velocità
+const thImp=.45,PD=1/600,PT=[];let tSmash=0;{let a=0,w=1.9;for(let k=0;k<4800;k++){PT.push(a);w+=(-(g/HL)*Math.sin(a)-.15*w)*PD;a+=w*PD;if(!tSmash&&w>0&&a>=thImp){tSmash=tHam+(k+1)*PD;w*=.35}}}
+const hamAng=t=>{const u=(t-tHam)/PD;if(u<=0)return 0;const k=Math.min(u|0,PT.length-2);return PT[k]+(PT[k+1]-PT[k])*Math.min(u-k,1)};
+const SX=HX+HL*Math.sin(thImp)+.4*Math.cos(thImp)+.275*Math.sin(thImp)+.18,SY=3.8;
+mk(B(.9,SY,.7),M(0x3a4256),SX+.18,SY/2,0);
+
+// 6-7 · secchio, carrucole, bandiera, lampada
+const XB=SX+2.4,YB=2.4,XF=XB+2.8,XL=XF+2.3,YF0=6.85-YB;
+const blocks=[],slots=[[-.18,.2],[.18,.2],[-.18,.56],[.18,.56],[0,.92]],order=[1,0,3,2,5],gnd=[4,6,7],BL=[];
+for(let r=0;r<4;r++)for(let c=0;c<2;c++){const m=mk(B(.36,.36,.36),M(new THREE.Color().setHSL(.02+.035*(r*2+c),.75,.5)),SX+.36*c,SY+.18+.36*r,0);blocks.push({m,p0:m.position.clone(),r})}
+blocks.forEach((b,i)=>{b.tl=tSmash+.03*b.r;b.j=order.indexOf(i);
+if(b.j>=0){const tl2=tSmash+.75+.08*b.j;b.T=tl2-b.tl;BL.push(tl2);b.v=V(XB+slots[b.j][0],YB+slots[b.j][1],0).sub(b.p0).divideScalar(b.T);b.v.y+=g*b.T/2;b.kq=1+b.j%2}
+else{const k=gnd.indexOf(i);b.v=V(1+.35*k,1.8,[-2.2,2.4,-1.5][k]);b.T=(1.8+Math.sqrt(3.24+2*g*(b.p0.y-.18)))/g;b.e=b.p0.clone().addScaledVector(b.v,b.T).setY(.18);b.kq=2}});
+// la discesa del secchio si allunga così la bandiera arriva a 14.1 s: bandiera e luce nell'ultimo secondo
+const tLast=Math.max(...BL),Db=Math.max(1.2,14.1-tLast),tFlag=tLast+Db,tLamp=tFlag+.25,LOOP=tFlag+.9;
+const bucket=G(XB,YB,0);
+mk(CY(.55,.45,.75,24,true),M(0x8899aa,{metalness:.6,roughness:.35,side:THREE.DoubleSide}),0,.375,0,bucket);
+mk(CY(.45,.45,.04,24),M(0x667788),0,.02,0,bucket);mk(new THREE.TorusGeometry(.55,.025,6,20,PI),M(0x333333),0,.75,0,bucket);
+const xm=(XB+XF)/2;mk(B(.15,7.9,.15),M(0x445566),xm,3.95,-.12);mk(B(XF-XB+.4,.15,.2),M(0x445566),xm,7.92,-.12);
+const wheels=[XB+.3,XF-.3].map(x=>{mk(B(.06,.65,.06),M(0x556070),x,7.55,-.12);const w=G(x,7.2,0);mk(new THREE.TorusGeometry(.3,.05,8,24),M(0xb0b8c0,{metalness:.7,roughness:.3}),0,0,0,w);mk(B(.56,.05,.05),M(0x888888),0,0,0,w);mk(B(.05,.56,.05),M(0x888888),0,0,0,w);return w});
+const rope=new THREE.Line(new THREE.BufferGeometry().setFromPoints([V(),V(XB,7.2,0),V(XB+.3,7.5,0),V(XF-.3,7.5,0),V(XF,7.2,0),V()]),new THREE.LineBasicMaterial({color:0xddd2b0}));rope.frustumCulled=false;S.add(rope);const rp=rope.geometry.attributes.position;
+mk(CY(.05,.05,7,8),M(0xccccdd,{metalness:.6}),XF+.06,3.5,0);
+const fg=new THREE.PlaneGeometry(1.1,.7,10,4);fg.translate(.55,-.35,0);const fp=fg.attributes.position,fx=Float32Array.from({length:fp.count},(_,i)=>fp.getX(i));
+const flag=mk(fg,M(0xff3b3b,{side:THREE.DoubleSide,roughness:.8}),XF+.11,YF0,0);
+const swb=mk(B(.3,.12,.25),M(0xaa2222,{emissive:0x33ff66,emissiveIntensity:0}),XF+.25,6.91,0);
+mk(B(.1,3.3,.1),M(0x445566),XL,1.65,0);
+const bulb=mk(new THREE.SphereGeometry(.25,20,14),M(0x665533,{emissive:0xffc860,emissiveIntensity:0}),XL,3.55,0);
+mk(new THREE.ConeGeometry(.45,.3,20,1,true),M(0x334455,{side:THREE.DoubleSide}),XL,3.85,0);
+const PL=new THREE.PointLight(0xffc870,0,0,2);PL.position.set(XL,3.5,.5);S.add(PL);
+const glow=spr(0xffd27a,1);glow.position.set(XL,3.55,.05);S.add(glow);
+const WP=[V(XF+.25,6.85,-.12),V(XF+.06,6.85,-.12),V(XF+.06,.03,-.12),V(XL,.03,-.12),V(XL,3.3,-.12)],WL=[0];
+for(let i=1;i<5;i++)WL.push(WL[i-1]+WP[i].distanceTo(WP[i-1]));
+S.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(WP),new THREE.LineBasicMaterial({color:0x7a8899})));
+const spark=spr(0xfff080,1);spark.scale.setScalar(.6);S.add(spark);
+// polvere: pool di sprite riusati
+const parts=[];for(let i=0;i<260;i++){const s=spr(0xffffff);s.visible=false;S.add(s);parts.push({s,v:V(),age:9,life:1,sz:1})}
+let pk=0;
+function spawn(p,n,sz,col=0xd8cbb0){for(let k=0;k<n;k++){const P=parts[pk++%parts.length],a=Math.random()*2*PI,sp=(.3+Math.random())*sz*1.6;P.s.position.copy(p);P.v.set(Math.cos(a)*sp,(.3+Math.random()*.8)*sz*1.4,Math.sin(a)*sp);P.age=0;P.life=.6+Math.random()*.5;P.sz=sz*(.6+Math.random()*.7);P.s.material.color.setHex(col);P.s.visible=true}}
+// etichette 1-7 in scena + HUD
+const LP=[[-16.5,5,0],[AX,4.3,AZ],[0,2,0],[HX,7.4,0],[SX+.2,5.8,0],[XB-.9,4.6,0],[XL,5,0]];
+const labs=LP.map((p,i)=>{const s=new THREE.Sprite(new THREE.SpriteMaterial({map:cv(128,x=>{x.fillStyle='#fff';x.beginPath();x.arc(64,64,58,0,7);x.fill();x.fillStyle='#111';x.font='bold 76px sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText(i+1,64,68)}),color:0x556070}));s.position.set(...p);S.add(s);return s});
+const NM=['Dominoes','Funnel','Seesaw','Pendulum','Smash','Pulley','Flag + Lamp'],hud=document.getElementById('hud'),fd=document.getElementById('f'),tmE=document.getElementById('tm');
+const pills=NM.map((n,i)=>{const e=document.createElement('div');e.className='s';e.textContent=i+1+' · '+n;hud.appendChild(e);return e});
+const ST=[.35,tMar,tSee,tHam,tSmash,tSmash+.75,tFlag];
+// eventi: scattano quando t li attraversa
+const EV=[],ev=(t,f)=>EV.push({t,f});
+ev(.35,()=>spawn(PE0,4,.25));
+doms.forEach(D=>{if(D.n.length)ev(D.ts+dt0,()=>spawn(V(D.p.x+D.f.x*.4,TOP+.72,D.p.z+D.f.z*.4),2,.22))});
+ev(tMar,()=>spawn(M0,6,.35));
+ev(DLa.ts+Math.sqrt(PI/alpha),()=>spawn(DLa.p.clone().addScaledVector(DLa.f,.7).setY(TOP+.05),6,.35));
+ev(tSee,()=>spawn(A,10,.45));ev(tL,()=>spawn(V(-1.75,.05,0),14,.55));
+ev(tHam,()=>spawn(V(HX-.4,AP.y,0),12,.4,0xfff0c0));ev(tHam+uG,()=>spawn(V(AP.x-uG,.05,0),6,.3));
+ev(tSmash,()=>spawn(V(SX+.18,SY+.4,0),40,.8));
+blocks.forEach(b=>ev(b.tl+b.T,()=>spawn(b.j>=0?V(XB,YB+.8,0):b.e,b.j>=0?8:10,.4)));
+ev(tFlag,()=>{spawn(V(XB,.05,0),36,.9);spawn(V(XF+.3,6.85,0),14,.3,0xffe066)});
+ev(tLamp,()=>spawn(V(XL,3.55,0),24,.5,0xffd040));
+const T1=V(),gF=V(),gO=V(),gP=V(),camP=V(),camL=V();let snap=true;
+const sa=t=>t<tSee?-RZ:t<tL?-RZ+2*RZ*((t-tSee)/Tf)**2:RZ;
+function mpos(t,o){const u=t-tMar;if(u<=0)return o.copy(M0);if(u<Tm)return mc.getPointAt(Math.min(Math.max((v0*u+am*u*u/2)/ML,0),1),o);const w=u-Tm;if(w<Th)return o.copy(PE).addScaledVector(hv,w).setY(PE.y+hv.y*w-4.9*w*w);return sw(-1.55,.05+rm,sa(t),o)}
+function b2(t,o){if(t<tL)return sw(1.55,.05+r2,sa(t),o);let u=t-tL;if(u<TB)return o.set(B1.x+vxB*u,B1.y+vyB*u-4.9*u*u,0);u-=TB;if(u<uG)return o.set(AP.x-u,AP.y+u-4.9*u*u,0);return o.set(AP.x-uG-.3*(1-E(-3*(u-uG))),r2,0)}
+function goal(t){
+if(t<tMar){let n=0;gF.set(0,0,0);for(const D of doms)if(D.ts<=t&&D.ts>t-.45){gF.add(D.p);n++}n?gF.divideScalar(n):gF.copy(p0);gO.set(-2.5,3.6,7)}
+else if(t<tSee-.1){mpos(t,gF).lerp(T1.set(AX,2.6,AZ),.55);gO.set(2.5,2.4,6.5)}
+else if(t<tHam){b2(t,gF).lerp(T1.set(0,.8,0),.5);gO.set(1,2.2,9.5)}
+else if(t<tSmash+.9){gF.set(5.6,3.8,0);gO.set(.5,1.5,9.5)}
+else{gF.set((XB+XL)/2,4,0);gO.set(-1,1.5,10.5)}}
+function upd(t,dt){
+for(let i=doms.length-1;i>=0;i--){const D=doms[i],u=t-D.ts;let a=u>0?Math.min(alpha*u*u/2,PI/2):0;for(const j of D.n){const q=doms[j].a;a=Math.min(a,q+Math.asin((d*Math.cos(q)-th)/h))}D.a=a;D.gr.rotation.x=a}
+const pu=t/.35,w0=t-.35;if(pu<1)pusher.position.lerpVectors(PS,PE0,pu*pu);else pusher.position.copy(PE0).addScaledVector(f0,Math.min(w0,.3)*.5).setY(Math.max(TOP+.2,PE0.y-4.9*w0*w0));
+mpos(t,marble.position);see.rotation.z=sa(t);b2(t,ball2.position);ham.rotation.z=hamAng(t);
+let wy=0,wr=0;for(const tb of BL){const u=t-tb;if(u>0){const e=E(-4*u);wy+=.07*e*Math.sin(10*u);wr+=.06*e*Math.sin(9*u)}}
+const ud=Math.min(Math.max((t-tLast)/Db,0),1),drop=YB*ud*ud;
+bucket.position.y=YB-drop-wy*(1-ud);bucket.rotation.z=wr*(1-ud);bucket.updateMatrixWorld();
+for(const b of blocks){const u=t-b.tl,m=b.m;
+if(u<=0){m.position.copy(b.p0);m.rotation.set(0,0,0)}
+else if(u<b.T){m.position.copy(b.p0).addScaledVector(b.v,u).y-=4.9*u*u;const r=-b.kq*PI/2*u/b.T;m.rotation.set(b.j<0?r:0,0,r)}
+else if(b.j>=0){bucket.localToWorld(m.position.set(...slots[b.j],0));m.rotation.set(0,0,bucket.rotation.z)}
+else{const w=.12*(1-E(-5*(u-b.T)));m.position.set(b.e.x+b.v.x*w,.18,b.e.z+b.v.z*w);m.rotation.set(-b.kq*PI/2,0,-b.kq*PI/2)}}
+flag.position.y=YF0+drop;for(let i=0;i<fp.count;i++){const x=fx[i];fp.setZ(i,.08*x*Math.sin(5*x-7*t))}fp.needsUpdate=true;fg.computeVertexNormals();
+wheels.forEach(w=>w.rotation.z=drop/.3);
+bucket.localToWorld(T1.set(0,1.3,0));rp.setXYZ(0,T1.x,T1.y,T1.z);rp.setXYZ(5,XF,flag.position.y,0);rp.needsUpdate=true;
+swb.material.emissiveIntensity=t>=tFlag?2:0;
+const k=THREE.MathUtils.smoothstep(t,tLamp,tLamp+.12)*(t<tLamp+.4?.75+.25*Math.sin(t*90):1);
+bulb.material.emissiveIntensity=3*k;PL.intensity=45*k;glow.material.opacity=.9*k;glow.scale.setScalar(3.2*k+.01);
+const q=(t-tFlag)/.25;spark.visible=q>0&&q<1;if(spark.visible){const s=q*WL[4];let i=1;while(i<4&&WL[i]<s)i++;spark.position.lerpVectors(WP[i-1],WP[i],(s-WL[i-1])/(WL[i]-WL[i-1]))}
+for(const P of parts){if(P.age>=P.life){P.s.visible=false;continue}P.age+=dt;const kk=Math.min(P.age/P.life,1);P.s.position.addScaledVector(P.v,dt);P.v.multiplyScalar(E(-3*dt));P.s.scale.setScalar(P.sz*(.4+1.2*kk));P.s.material.opacity=.7*(1-kk)}
+ST.forEach((s,i)=>{const on=t>=s;pills[i].classList.toggle('on',on);labs[i].material.color.setHex(on?0xffb02e:0x556070);labs[i].scale.setScalar(on?.9+.5*E(-6*(t-s)):.6)});
+fd.style.opacity=t<.3?1-t/.3:t>LOOP-.2?(t-LOOP+.2)/.2:0;tmE.textContent='EXTREME RUBE-GOLDBERG · '+t.toFixed(1)+' / '+LOOP.toFixed(1)+' s';
+goal(t);gP.copy(gF).add(gO);if(snap){camP.copy(gP);camL.copy(gF);snap=false}else{camP.lerp(gP,1-E(-2.2*dt));camL.lerp(gF,1-E(-3.5*dt))}C.position.copy(camP);C.lookAt(camL)}
+let t0=performance.now(),prevT=0,last0=t0;
+R.setAnimationLoop(()=>{const now=performance.now(),dt=Math.min((now-last0)/1000,.1);last0=now;let t=(now-t0)/1000;
+if(t>=LOOP){t%=LOOP;t0=now-t*1000;prevT=0;snap=true;parts.forEach(P=>P.age=P.life)}
+for(const e of EV)if(e.t>prevT&&e.t<=t)e.f();prevT=t;upd(t,dt);R.render(S,C)});
+</script></body></html>

@@ -4,10 +4,10 @@ no API key) to apply the rubric. Env: VIDEO, PROMPT_FILE (set by bench), CODEX_J
 import os, sys, subprocess, tempfile, pathlib
 
 video, prompt = os.environ["VIDEO"], open(os.environ["PROMPT_FILE"]).read()
-model = os.environ.get("CODEX_JUDGE_MODEL", "gpt-6-luna"); N = 16
+model = os.environ.get("CODEX_JUDGE_MODEL", "gpt-6-luna"); N = int(os.environ.get("JUDGE_FRAMES", "24"))
 tmp = pathlib.Path(tempfile.mkdtemp(prefix="judge-")); imgs = []
 for i in range(N):
-    t = round(0.3 + i * 9.4 / (N - 1), 2); f = tmp / f"f{i:02d}.png"
+    t = round(0.3 + i * 14.4 / (N - 1), 2); f = tmp / f"f{i:02d}.png"
     subprocess.run(["ffmpeg", "-loglevel", "error", "-ss", str(t), "-i", video, "-frames:v", "1", "-vf", "scale=480:-2", str(f)], stdin=subprocess.DEVNULL)
     if f.exists(): imgs += ["-i", str(f)]
 if not imgs: sys.exit("no frames extracted")

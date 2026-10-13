@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chain Reaction</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#0d111b}
+canvas{display:block}
+#st{position:fixed;left:16px;top:16px;display:flex;flex-direction:column;gap:6px;font:600 13px/1 system-ui,sans-serif;white-space:pre}
+#st div{padding:7px 13px;border-radius:14px;background:#1b2233cc;color:#6c7794;border:1px solid #2c3550;transition:.25s}
+#st div.on{background:#ffb02e;color:#201400;border-color:#ffe2a0;box-shadow:0 0 14px #ffb02e99;transform:translateX(6px)}
+#fd{position:fixed;inset:0;background:#0d111b;opacity:0;pointer-events:none}
+</style></head><body><div id="st"></div><div id="fd"></div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+const V=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z),PI=Math.PI,G=12,sin=Math.sin,cos=Math.cos,ex=Math.exp;
+const cl=(x,a=0,b=1)=>Math.min(b,Math.max(a,x)),L=(a,b,k)=>a+(b-a)*k;
+const S=(a,b,x)=>{x=cl((x-a)/(b-a));return x*x*(3-2*x)},S5=x=>{x=cl(x);return x*x*x*(x*(6*x-15)+10)};
+let seed=7;const rnd=()=>(seed=(seed*1664525+1013904223)>>>0)/4294967296;
+// tempi della catena (s) e misure della scena
+const T0=.5,TC=.258,D=.4,TH=T0+18*TC+.2,TM=2,TL=TH+TM+.3,TB=TL+.1,T2=TB+1.3,TS=T2+.3,TH0=10.95,TF=14.5,LOOP=15;
+const XF=2.62,YF=.6,XS=XF+1.365,A0=-.26,A1=.26,XH=8.3,YP=3,LH=2.2,PH=.62,XK=10.8,XB=14,XW=XB+.6,YW=5.6,YB0=2.4,HJ=1.7,HO=2,YF0=2.6;
+
+const R=new THREE.WebGLRenderer({antialias:true});R.setPixelRatio(Math.min(devicePixelRatio,2));R.setSize(innerWidth,innerHeight);
+R.shadowMap.enabled=true;R.shadowMap.type=THREE.PCFSoftShadowMap;R.toneMapping=THREE.ACESFilmicToneMapping;document.body.appendChild(R.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x0d111b);scene.fog=new THREE.Fog(0x0d111b,35,90);
+const cam=new THREE.PerspectiveCamera(48,innerWidth/innerHeight,.1,200);
+addEventListener('resize',()=>{R.setSize(innerWidth,innerHeight);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()});
+scene.add(new THREE.HemisphereLight(0xa9bcff,0x3a2e22,1.2));
+const sun=new THREE.DirectionalLight(0xfff1de,2.4);sun.position.set(-6,20,12);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);
+Object.assign(sun.shadow.camera,{left:-30,right:30,top:16,bottom:-16,near:1,far:60});sun.shadow.camera.updateProjectionMatrix();
+sun.shadow.bias=-.0004;sun.shadow.normalBias=.03;scene.add(sun);
+const fx=new THREE.PointLight(0xffe2b0,0,10,2),lamp=new THREE.PointLight(0xffd48a,0,0,2);let fk=0;
+lamp.position.set(XW,6.75,0);scene.add(fx,lamp);
+
+const mat=(c,o={})=>new THREE.MeshStandardMaterial({color:c,roughness:.5,metalness:.15,...o});
+const box=(w,h,d)=>new THREE.BoxGeometry(w,h,d);
+const mesh=(g,m,x=0,y=0,z=0,p=scene)=>{const o=new THREE.Mesh(g,m);o.position.set(x,y,z);o.castShadow=o.receiveShadow=true;p.add(o);return o};
+const MM=mat(0x4a5470);
+const fl0=mesh(new THREE.PlaneGeometry(140,60),mat(0x232b3d,{roughness:.95,metalness:0}));fl0.rotation.x=-PI/2;fl0.castShadow=false;
+const grid=new THREE.GridHelper(140,140,0x3a4666,0x2a3350);grid.position.y=.01;scene.add(grid);
+
+// polvere: pool di sprite, ognuno con il suo materiale
+const dc=document.createElement('canvas');dc.width=dc.height=64;
+{const c=dc.getContext('2d'),g=c.createRadialGradient(32,32,0,32,32,32);g.addColorStop(0,'rgba(255,255,255,1)');g.addColorStop(1,'rgba(255,255,255,0)');c.fillStyle=g;c.fillRect(0,0,64,64)}
+const dtex=new THREE.CanvasTexture(dc),dust=[];let di=0;
+for(let i=0;i<80;i++){const s=new THREE.Sprite(new THREE.SpriteMaterial({map:dtex,transparent:true,depthWrite:false,opacity:0,color:0xd8d2c4}));s.visible=false;scene.add(s);dust.push({s,v:V(),l:0,m:1,z:1})}
+function puff(p,n=6,z=1,c=0xd8d2c4){
+ fx.position.set(p.x,p.y+.8,p.z);fk=1;
+ for(let k=0;k<n;k++){const d=dust[di++%80];d.s.position.set(p.x+(rnd()-.5)*.5*z,p.y,p.z+(rnd()-.5)*.5*z);d.v.set((rnd()-.5)*2*z,.5+rnd(),(rnd()-.5)*2*z);d.l=d.m=.7+rnd()*.5;d.z=z*(.8+rnd()*.5);d.s.material.color.setHex(c);d.s.visible=true}
+}
+
+// etichette degli stadi
+const st=document.getElementById('st'),fd=document.getElementById('fd');
+const chips=['Dominoes','Funnel','Seesaw','Hammer','Blocks','Pulley','Lamp'].map((n,i)=>{const d=document.createElement('div');d.textContent=(i+1)+'  '+n;st.appendChild(d);return d});
+const lit=n=>chips[n-1].classList.add('on');
+
+// stadio 1: domino a S con ramo e ponte; il percorso finisce sul domino alto in (0,0)
+const P=[];{let x=0,z=0;for(let j=0;j<19;j++){const h=.7*sin(.45*j)*cl((16.2-j*.9)/3.5);P.push({x,z,h});x+=.9*cos(h);z+=.9*sin(h)}}
+{const ox=P[18].x+.15,oz=P[18].z;P.forEach(p=>{p.x-=ox;p.z-=oz})}
+const dom=[];
+function dm(j,off,w,H,d,col){
+ const p=P[j],h=p.h,g=new THREE.Group();g.rotation.order='YXZ';g.rotation.y=PI/2-h;
+ g.position.set(p.x-sin(h)*off+cos(h)*d/2,0,p.z+cos(h)*off+sin(h)*d/2);
+ mesh(box(w,H,d),mat(col),0,H/2,-d/2,g);scene.add(g);dom.push({g,j});
+}
+for(let j=0;j<19;j++){
+ const c=new THREE.Color().setHSL((.02+j*.047)%1,.7,.55);
+ if(j<7||(j>12&&j<18))dm(j,0,.7,1.4,.22,c);
+ else if(j==7)dm(j,0,1.5,1.4,.22,c);
+ else if(j<12){const o=[.6,1,1,.6][j-8];dm(j,o,.6,1.4,.22,c);dm(j,-o,.6,1.4,.22,c)}
+ else if(j==12)dm(j,0,2,1.4,.22,c);
+ else dm(j,0,1,3.5,.3,c);
+}
+const th=new Array(20).fill(9);
+const fin=mesh(new THREE.SphereGeometry(.2,16,12),mat(0xff8a4c));
+
+// stadio 2: torre imbuto e biglia a spirale
+const gl=mat(0x9fd8ff,{transparent:true,opacity:.3,side:THREE.DoubleSide,roughness:.1,depthWrite:false});
+mesh(new THREE.CylinderGeometry(1,.42,1.5,36,1,true),gl,XF,2.4,0).castShadow=false;
+mesh(new THREE.CylinderGeometry(.42,.42,.45,24,1,true),gl,XF,1.425,0).castShadow=false;
+const lip=mesh(new THREE.RingGeometry(1,1.55,40),mat(0xffc857,{side:THREE.DoubleSide}),XF,3.15,0);lip.rotation.x=-PI/2;
+for(let k=0;k<3;k++){const a=k*2*PI/3;mesh(new THREE.CylinderGeometry(.07,.07,3.15,8),mat(0xb8c0d8),XF+1.5*cos(a),1.575,1.5*sin(a))}
+const mb=mesh(new THREE.SphereGeometry(.25,24,16),mat(0xff4d5a,{roughness:.2,metalness:.3}));
+const Cr=y=>.42+.58*cl((y-1.65)/1.5);
+const sp=(p,o)=>{const y=L(3.4,1.85,p),r=L(1.31,Cr(y-.25)-.25,S(0,.3,p)),a=PI+PI*5.2*p**1.4;return o.set(XF+r*cos(a),y,r*sin(a))};
+
+// stadio 3: altalena e seconda palla
+const onS=(lx,ly,a,o=V())=>o.set(XS+lx*cos(a)-ly*sin(a),YF+lx*sin(a)+ly*cos(a),0);
+const aT=u=>u<0?A0:u<.14?L(A0,A1,S(0,1,u/.14)):A1-.06*ex(-6*(u-.14))*Math.abs(sin(18*(u-.14)));
+const see=new THREE.Group();see.position.set(XS,YF,0);scene.add(see);
+mesh(box(3.6,.16,1),mat(0x8a6a44),0,0,0,see);mesh(box(.12,.3,1),mat(0xff7a2f),1.74,.23,0,see);mesh(box(.5,.52,.9),MM,XS,.26,0);
+const b2=mesh(new THREE.SphereGeometry(.28,24,16),mat(0x4dd0ff,{roughness:.25,metalness:.3}));
+// volo balistico in forma chiusa: v=(P1-P0)/T-0.5*a*T, il contatto cade all'istante voluto
+const mk=(P0,P1,T)=>{const v=P1.clone().sub(P0).divideScalar(T);v.y+=.5*G*T;return{P0,P1,T,v}};
+const at=(o,u,r)=>r.set(o.P0.x+o.v.x*u,o.P0.y+o.v.y*u-.5*G*u*u,o.P0.z+o.v.z*u);
+const mf=mk(sp(1,V()),onS(-1.5,.33,A0),TL-TH-TM),bo=mk(onS(1.4,.36,aT(TB-TL)),V(XH-.73,YP-LH+.05,0),T2-TB);
+
+// stadio 4: martello a pendolo
+mesh(box(.2,3,.2),MM,XH,1.5,-1.2);mesh(box(.2,3,.2),MM,XH,1.5,1.2);mesh(box(.2,.2,2.6),MM,XH,3.1,0);
+const ham=new THREE.Group();ham.position.set(XH,YP,0);scene.add(ham);
+mesh(box(.1,LH,.1),mat(0xb0b8cc),0,-LH/2,0,ham);mesh(box(.9,.9,1.8),mat(0xd94f4f),0,-LH,0,ham);
+const phiAt=t=>{const u=t-T2;return u<0?0:u<.3?.941*sin(2.4*u):PH*ex(-.7*(u-.3))*cos(2.1*(u-.3))};
+
+// stadio 5: pila di blocchi a piramide
+const bm=[0xf4a259,0x5b8e7d,0xbc4b51,0x8cb369,0xf4e285,0x7f9cf5].map(c=>mat(c)),blk=[];
+[[-.58,.275],[0,.275],[.58,.275],[-.29,.825],[.29,.825],[0,1.375]].forEach(([dx,y],i)=>{
+ const bu=i>2,T=[.5,.6,.7,1.1,1.2,1.3][i],P0=V(XK+dx,y,0);
+ const P1=bu?V(XB+[-.55,.55,0][i-3],i<5?2.715:3.265,0):V(XK+dx+[.9,1.3,1.7][i],.275,0);
+ blk.push({m:mesh(box(.55,.55,.55),bm[i],P0.x,y,0),f:mk(P0,P1,T),tl:TS+T,bu,kx:1+Math.floor(rnd()*3),kz:1+Math.floor(rnd()*3),loc:P1.clone().sub(V(XB,YB0+HJ,0))});
+});
+
+// stadio 6: secchio, carrucola, bandiera
+const ropeM=mat(0xd9c9a3),BM=mat(0x9aa7c2),bk=new THREE.Group();scene.add(bk);
+mesh(box(1.7,.08,1),BM,0,-HJ,0,bk);
+[-1,1].forEach(s=>{mesh(box(1.7,.8,.06),BM,0,-1.26,s*.5,bk);mesh(box(.06,.8,1),BM,s*.85,-1.26,0,bk);mesh(box(.04,1.03,.04),ropeM,0,-.45,s*.25,bk).rotation.x=-s*.5071});
+const ropeL=mesh(box(.05,1,.05),ropeM),ropeR=mesh(box(.05,1,.05),ropeM);
+const wh=new THREE.Group();wh.position.set(XW,YW,0);scene.add(wh);
+mesh(new THREE.CylinderGeometry(.6,.6,.14,36),mat(0xc9ced9),0,0,0,wh).rotation.x=PI/2;
+mesh(box(1.1,.07,.2),MM,0,0,0,wh);mesh(box(.07,1.1,.2),MM,0,0,0,wh);
+mesh(box(.25,7,.25),MM,XW,3.5,-.9);mesh(box(.12,.12,.9),MM,XW,YW,-.45);mesh(box(.12,.12,1),MM,XW,7.05,-.4);
+const fl=new THREE.Group();scene.add(fl);
+mesh(new THREE.PlaneGeometry(1.2,.8),mat(0xe63946,{side:THREE.DoubleSide}),.6,-.46,0,fl);
+mesh(new THREE.CircleGeometry(.22,24),mat(0xffffff,{side:THREE.DoubleSide}),.6,-.46,.01,fl);
+mesh(box(1.25,.06,.06),MM,.6,-.03,0,fl);
+
+// stadio 7: lampada
+const bulbM=mat(0x6b5a3a,{emissive:0xffc860,emissiveIntensity:0});
+mesh(new THREE.SphereGeometry(.3,24,16),bulbM,XW,6.75,0).castShadow=false;
+const glow=new THREE.Sprite(new THREE.SpriteMaterial({map:dtex,color:0xffcf70,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,opacity:0}));glow.position.copy(lamp.position);scene.add(glow);
+
+// eventi: etichette e polvere
+const ev=[],E=(t,f)=>ev.push([t,f]);
+E(T0,()=>{lit(1);puff(V(P[0].x,.1,P[0].z),6)});
+E(T0+12*TC+.12,()=>puff(V(P[12].x,.1,P[12].z),8,1.3));
+E(TH,()=>{lit(2);puff(V(1.1,3.3,0),6,.8)});
+E(TL,()=>{lit(3);puff(V(XF,1.1,0),8)});
+E(TB,()=>puff(V(XS+1.5,1.1,0),6));
+E(T2,()=>{lit(4);puff(V(XH-.6,.9,0),8)});
+E(TS,()=>{lit(5);puff(V(XK-.3,.9,0),18,1.7)});
+blk.forEach((b,i)=>E(b.tl,()=>{if(i==3)lit(6);puff(V(b.f.P1.x,b.bu?b.f.P1.y:.1,0),7,.9)}));
+E(TF,()=>{lit(7);puff(V(XW,6.75,0),12,1.3,0xffe3a0)});
+ev.sort((a,b)=>a[0]-b[0]);
+
+// camera che segue l'azione
+const hh=V(),foc=V(),tg=V(),co=V(),tmp=V();
+function aim(t){
+ if(t<TH-.15){const p=P[cl(Math.floor((t-T0)/TC),0,18)];tg.set(p.x,.9,p.z);co.set(1.5,4,9.5)}
+ else if(t<TL+.05){tg.copy(mb.position);co.set(0,1.2,8)}
+ else if(t<T2-.3){tg.copy(b2.position);co.set(1,2,9)}
+ else if(t<TS+.45){tg.copy(hh);co.set(0,1.5,9.5)}
+ else if(t<TH0-.2){tg.set(L(XK,XB,S(TS+.2,TS+1.1,t)),2.6,0);co.set(1,2,10)}
+ else{tg.set(XW+.3,3.6,0);co.set(-1,.8,12)}
+}
+let t=0,ei=0,prev=0,loops=0,phi=0;
+function reset(){t=0;ei=0;seed=7;fk=0;phi=0;chips.forEach(c=>c.classList.remove('on'));dust.forEach(d=>{d.l=0;d.s.visible=false});aim(0);foc.copy(tg);cam.position.copy(tg).add(co)}
+reset();
+R.setAnimationLoop(now=>{
+ const n=now||performance.now(),dt=cl((n-prev)/1000,0,.05);prev=n;t+=dt;
+ if(t>=LOOP){loops++;reset()}
+ while(ei<ev.length&&ev[ei][0]<=t)ev[ei++][1]();
+ // domino: caduta libera, ma ogni pezzo non supera il successivo + 0.5 rad (appoggio)
+ for(let j=18;j>=0;j--){const u=t-T0-j*TC;th[j]=Math.min(u<0?0:Math.min(j>17?.31:1.2,1.2*(u/D)**2),th[j+1]+.5)}
+ for(const d of dom)d.g.rotation.x=th[d.j];
+ const q=P[0],fr=.31+1.2*(1-S(.05,T0,t));fin.position.set(q.x-cos(q.h)*fr,1.15,q.z-sin(q.h)*fr);
+ const mu=t-TH;
+ if(t>=TL)onS(-1.5,.33,aT(t-TL),mb.position);else if(mu>=TM)at(mf,mu-TM,mb.position);else sp(cl(mu/TM),mb.position);
+ see.rotation.z=aT(t-TL);
+ if(t<TB)onS(1.4,.36,aT(t-TL),b2.position);else if(t<T2)at(bo,t-TB,b2.position);
+ else{const w=t-T2;b2.position.set(bo.P1.x-.9*(1-ex(-2.5*w)),Math.max(.28,bo.P1.y-6*w*w),0)}
+ phi=phiAt(t);ham.rotation.z=phi;hh.set(XH+LH*sin(phi),YP-LH*cos(phi),0);
+ for(const b of blk){const m=b.m,w=t-TS;
+  if(w<b.f.T){if(m.parent!==scene)scene.add(m);if(w<0){m.position.copy(b.f.P0);m.rotation.set(0,0,0)}else{at(b.f,w,m.position);m.rotation.set(b.kx*PI/2*w/b.f.T,0,b.kz*PI/2*w/b.f.T)}}
+  else{m.rotation.set(b.kx*PI/2,0,b.kz*PI/2);if(b.bu){if(m.parent!==bk)bk.add(m);m.position.copy(b.loc)}else m.position.copy(b.f.P1)}}
+ const e=S5((t-TH0)/(TF-TH0)),yj=YB0+HJ-HO*e,yf=YF0+HO*e;
+ bk.position.set(XB,yj,0);
+ let tz=0;for(const[i,kk]of[[3,-1],[4,1],[5,.6]]){const v=t-blk[i].tl;if(v>0)tz+=kk*.12*ex(-4*v)*sin(14*v)}bk.rotation.z=tz;
+ ropeL.scale.y=YW-yj;ropeL.position.set(XB,(YW+yj)/2,0);ropeR.scale.y=YW-yf;ropeR.position.set(XW+.6,(YW+yf)/2,0);
+ fl.position.set(XW+.6,yf,0);fl.rotation.y=.18*sin(t*4);wh.rotation.z=HO*e/.6;
+ const lk=S(TF-.1,TF+.25,t);lamp.intensity=110*lk;bulbM.emissiveIntensity=3*lk;glow.material.opacity=.9*lk;glow.scale.setScalar(4*lk+.01);
+ fx.intensity=50*fk;fk*=ex(-dt*7);
+ for(const d of dust)if(d.l>0){d.l-=dt;const a=Math.max(d.l,0)/d.m;d.s.position.addScaledVector(d.v,dt);d.v.multiplyScalar(.96);d.s.scale.setScalar(d.z*(.5+(1-a)*1.6));d.s.material.opacity=.55*a;if(d.l<=0)d.s.visible=false}
+ aim(t);foc.lerp(tg,1-ex(-dt*3));cam.position.lerp(tmp.copy(tg).add(co),1-ex(-dt*2));cam.lookAt(foc);
+ fd.style.opacity=Math.max(S(LOOP-.3,LOOP,t),loops?1-S(0,.3,t):0);
+ R.render(scene,cam);
+});
+</script></body></html>

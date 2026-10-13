@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>Orrery automaton</title>
+<link rel="icon" href="data:,">
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#0a0806}canvas{display:block}</style>
+</head><body><script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+const PI=Math.PI,TAU=2*PI,V2=THREE.Vector2,sin=Math.sin,cos=Math.cos,exp=Math.exp,rad=x=>x*PI/180;
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);
+renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.1;
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x0a0806);scene.fog=new THREE.Fog(0x0a0806,17,32);
+const cam=new THREE.PerspectiveCamera(38,innerWidth/innerHeight,.1,80);
+// helper
+const M=(c,r,m)=>new THREE.MeshStandardMaterial({color:c,roughness:r,metalness:m});
+const brass=M(0xc9a24a,.32,1),steel=M(0xa9b1ba,.28,1),copper=M(0xb8683a,.34,1),gold=M(0xf2c75c,.22,1),bronze=M(0x4a3727,.55,.85),lapis=M(0x3b6ea8,.25,.7);
+bronze.envMapIntensity=.5;
+const add=(p,g,m,x=0,y=0,z=0)=>{const o=new THREE.Mesh(g,m);o.position.set(x,y,z);o.castShadow=o.receiveShadow=true;p.add(o);return o};
+const cyl=(p,r,l,m,x,y,z)=>{const g=new THREE.CylinderGeometry(r,r,l,20);g.rotateX(PI/2);return add(p,g,m,x,y,z)};
+const mkbar=(p,w,d,m,z)=>add(p,new THREE.BoxGeometry(1,w,d),m,0,0,z);
+const bar=(o,x1,y1,x2,y2)=>{o.position.set((x1+x2)/2,(y1+y2)/2,o.position.z);o.rotation.z=Math.atan2(y2-y1,x2-x1);o.scale.x=Math.hypot(x2-x1,y2-y1);return o};
+const canv=(w,h,f)=>{const c=document.createElement('canvas');c.width=w;c.height=h;f(c.getContext('2d'));return c};
+const tex=c=>{const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t};
+// ambiente finto: gradiente + softbox
+const envT=tex(canv(512,256,g=>{const l=g.createLinearGradient(0,0,0,256);l.addColorStop(0,'#6b5a45');l.addColorStop(.5,'#2b2219');l.addColorStop(1,'#0d0a07');g.fillStyle=l;g.fillRect(0,0,512,256);
+ g.fillStyle='#fff0d0';g.fillRect(70,40,110,46);g.fillRect(330,30,90,30);g.fillStyle='#8fa8c8';g.fillRect(230,80,40,80);g.fillStyle='#ffb070';g.fillRect(440,100,40,50)}));
+envT.mapping=THREE.EquirectangularReflectionMapping;
+scene.environment=new THREE.PMREMGenerator(renderer).fromEquirectangular(envT).texture;
+const sun=new THREE.DirectionalLight(0xfff0d8,2.6);sun.position.set(4,7,11);sun.castShadow=true;
+Object.assign(sun.shadow.camera,{left:-9,right:9,top:6,bottom:-6,near:1,far:40});sun.shadow.camera.updateProjectionMatrix();
+sun.shadow.mapSize.set(2048,2048);sun.shadow.bias=-.0004;sun.shadow.normalBias=.02;scene.add(sun);
+const fill=new THREE.PointLight(0x9bb8ff,120,0,2);fill.position.set(-7,2,7);scene.add(fill);
+const warm=new THREE.PointLight(0xffb060,160,0,2);warm.position.set(6,-3,6);scene.add(warm);
+const flash=new THREE.PointLight(0xffe0a0,0,6,2);scene.add(flash);
+// piastra posteriore e colonne
+add(scene,new THREE.BoxGeometry(17,9.4,.2),bronze,-.5,0,-1.7);
+const pg=new THREE.LatheGeometry([[.13,0],[.2,.1],[.11,.22],[.09,.5],[.15,.95],[.09,1.4],[.11,1.9],[.2,2.15],[.13,2.3]].map(a=>new V2(a[0],a[1])),20);pg.rotateX(PI/2);
+[[-6.2,2.5],[-.3,3],[5,2.6],[-6.2,-2.6],[.6,-2.8],[5,-2.6]].forEach(p=>add(scene,pg,brass,p[0],p[1],-1.6));
+// ingranaggi: rot = ph + k*E ; ingranamento: distanza m(N1+N2)/2, k figlio = -k*N1/N2
+const gears=[];
+function gear(N,m,z,mat,x,y,k,ph,rat){
+  const rp=m*N/2,ro=rp+m,rr=rp-(rat?2.4:1.15)*m,a=TAU/N,s=new THREE.Shape(),pts=[];
+  for(let i=0;i<N;i++){const c=i*a;
+    if(rat)pts.push([rr,c],[ro,c+.38*a],[rr,c+.42*a]);
+    else pts.push([rr,c-.32*a],[ro,c-.15*a],[ro,c+.15*a],[rr,c+.32*a])}
+  pts.forEach((p,i)=>{const X=p[0]*cos(p[1]),Y=p[0]*sin(p[1]);i?s.lineTo(X,Y):s.moveTo(X,Y)});
+  if(N>=30)for(let i=0;i<6;i++){const q=i*TAU/6,h=new THREE.Path();h.absarc(.56*rp*cos(q),.56*rp*sin(q),.15*rp,0,TAU,true);s.holes.push(h)}
+  const g=new THREE.ExtrudeGeometry(s,{depth:.07,bevelEnabled:true,bevelThickness:.01,bevelSize:.008,bevelSegments:1,curveSegments:16});
+  g.translate(0,0,-.035);
+  const me=add(scene,g,mat,x,y,z);cyl(me,Math.min(.12,rp*.3),.12,mat,0,0,0);
+  const o={N,m,x,y,k,ph,me};gears.push(o);return o}
+const mate=(p,N,m,z,mat)=>gear(N,m,z,mat,p.x,p.y,p.k,0);
+const mesh=(p,N,z,mat,phi)=>gear(N,p.m,z,mat,p.x+p.m*(p.N+N)/2*cos(phi),p.y+p.m*(p.N+N)/2*sin(phi),-p.k*p.N/N,((phi-p.ph)*p.N+(phi+PI)*N-PI)/N);
+const D={x:-3.4,y:-.1},aE=rad(-25),Ew={x:D.x+2*cos(aE),y:D.y+2*sin(aE)};
+const A1=gear(40,.05,-.95,brass,Ew.x,Ew.y,1,0);          // asse E, +1 (6° a tick)
+const B1=mesh(A1,40,-.95,steel,aE+PI);                   // asse S: secondi, cade su D
+const S2=mate(B1,8,.04,-.8,brass);
+const C1=mesh(S2,60,-.8,copper,rad(200));
+const C2=mate(C1,8,.04*34/36,-.65,steel);
+const M1=mesh(C2,64,-.65,brass,rad(200)+PI);             // asse M: minuti, di nuovo su D
+const M2=mate(M1,12,.04,-.5,steel);
+const X1=mesh(M2,36,-.5,gold,rad(-100));
+const X2=mate(X1,10,.0384,-.35,steel);
+const H1=mesh(X2,40,-.35,copper,rad(-100)+PI);           // asse H: ore, su D
+const K1=mesh(A1,10,-.95,steel,rad(50));                 // k=-4
+const K2=mate(K1,36,.05,-.8,brass);
+const K3=mesh(K2,12,-.8,steel,rad(60));                  // k=+12: camma del colpo, 5 tick/giro
+const K4=mate(K3,20,.05,-.65,gold);
+const W1=mesh(K4,16,-.65,copper,rad(-40));               // k=-15: camma del passo, 4 tick/giro
+gear(30,.036,-.1,steel,Ew.x,Ew.y,1,0,true);              // ruota di scappamento a dente di sega
+[A1,C1,X1,K1,K3,W1].forEach(g=>cyl(scene,.035,.9,steel,g.x,g.y,-.55));
+cyl(scene,.045,1.9,steel,D.x,D.y,-.1);
+// quadrante a scheletro
+const dT=tex(canv(1024,1024,g=>{g.translate(512,512);g.strokeStyle='#eadfc2';g.lineWidth=128;g.beginPath();g.arc(0,0,448,0,TAU);g.stroke();
+ g.strokeStyle=g.fillStyle='#2a1d12';
+ for(let i=0;i<60;i++){g.save();g.rotate(i*TAU/60);g.lineWidth=i%5?3:9;g.beginPath();g.moveTo(0,-504);g.lineTo(0,i%5?-486:-466);g.stroke();g.restore()}
+ g.font='bold 60px serif';g.textAlign='center';g.textBaseline='middle';
+ for(let i=1;i<=12;i++){const a=i*PI/6;g.fillText(i,416*sin(a),-416*cos(a))}}));
+dT.anisotropy=8;
+const dm=new THREE.MeshStandardMaterial({map:dT,alphaTest:.5,roughness:.45,metalness:.15});
+add(scene,new THREE.CircleGeometry(1.4,96),dm,D.x,D.y,.55);
+add(scene,new THREE.TorusGeometry(1.4,.04,12,96),brass,D.x,D.y,.58);
+add(scene,new THREE.TorusGeometry(1.05,.02,8,96),brass,D.x,D.y,.58);
+function hand(l,w,m,z){const s=new THREE.Shape();s.moveTo(-w,-l*.22);s.lineTo(w,-l*.22);s.lineTo(w*.45,l*.7);s.lineTo(0,l);s.lineTo(-w*.45,l*.7);s.closePath();
+ return add(scene,new THREE.ExtrudeGeometry(s,{depth:.02,bevelEnabled:false}),m,D.x,D.y,z)}
+const hH=hand(.72,.055,gold,.62),hM=hand(1.05,.04,gold,.67),hS=hand(1.25,.016,copper,.72);
+add(scene,new THREE.SphereGeometry(.07,16,12),brass,D.x,D.y,.76);
+// orrery: pianeti a -3E e -0.75E (rapporto 1:4)
+const O={x:D.x,y:D.y+2.4},oa=[];
+add(scene,new THREE.CylinderGeometry(.035,.035,1.15,12),brass,O.x,1.82,.8);
+add(scene,new THREE.SphereGeometry(.17,24,16),new THREE.MeshStandardMaterial({color:0xffc060,emissive:0xff9a30,emissiveIntensity:1.4,roughness:.3,metalness:.4}),O.x,O.y,.95);
+[[.45,.09,copper,3],[.85,.14,lapis,.75]].forEach(([r,pr,m,k])=>{const g=new THREE.Group();g.position.set(O.x,O.y,.95);scene.add(g);
+ bar(mkbar(g,.025,.025,brass,0),0,0,r,0);add(g,new THREE.SphereGeometry(pr,24,16),m,r,0,0);oa.push([g,k]);
+ add(scene,new THREE.TorusGeometry(r,.006,6,72),brass,O.x,O.y,.95)});
+// ancora + pendolo: un solo corpo rigido sul perno
+const pend=new THREE.Group();pend.position.set(Ew.x,Ew.y+.95,.25);scene.add(pend);
+bar(mkbar(pend,.06,.06,steel,-.2),0,0,-.3,-.53);bar(mkbar(pend,.06,.06,steel,-.2),0,0,.3,-.53);
+[-1,1].forEach(sx=>{add(pend,new THREE.BoxGeometry(.16,.06,.07),steel,sx*.3,-.53,-.2).rotation.z=sx*.7});
+cyl(pend,.07,.14,brass,0,0,0);bar(mkbar(pend,.045,.04,steel,0),0,0,0,-2.45);
+add(pend,new THREE.SphereGeometry(.3,32,16),gold,0,-2.5,0).scale.z=.3;
+// colpo: camma -> leva -> martello -> campana
+const Q=K3,Fx=Q.x-.75,Fy=Q.y+.35,bx=Fx+2.4,by=Fy-.55;
+const lift=c=>c<.8?sin(c/.8*PI/2):1-((c-.8)/.2)**2;       // sale in 4 tick, cade nel 5°
+const cs=new THREE.Shape();
+for(let i=0;i<=120;i++){const q=i*TAU/120,r=.3+.13*lift((((PI/2-q)/TAU)%1+1)%1),x=r*cos(q),y=r*sin(q);i?cs.lineTo(x,y):cs.moveTo(x,y)}
+const sc=add(scene,new THREE.ExtrudeGeometry(cs,{depth:.08,bevelEnabled:false}),copper,Q.x,Q.y,-.14);cyl(sc,.08,.12,steel,0,0,.04);
+const lv=new THREE.Group();lv.position.set(Fx,Fy,-.1);scene.add(lv);
+bar(mkbar(lv,.07,.06,steel,0),-.25,0,2.4,0);cyl(lv,.05,.12,steel,.75,0,0);cyl(lv,.07,.14,brass,0,0,0);
+add(lv,new THREE.SphereGeometry(.09,16,12),gold,2.4,0,0);cyl(scene,.04,1.4,steel,Fx,Fy,-.85);
+const bellM=M(0xffd36a,.2,1);bellM.emissive=new THREE.Color(0xff9a30);bellM.emissiveIntensity=0;bellM.side=THREE.DoubleSide;
+const bp=[new V2(.58,-.03),new V2(.5,0)];for(let i=1;i<=18;i++){const t=i/18*PI/2;bp.push(new V2(.5*cos(t),.46*sin(t)))}
+const bellG=new THREE.Group();bellG.position.set(bx,by,-.1);scene.add(bellG);
+add(bellG,new THREE.LatheGeometry(bp,40),bellM);
+add(scene,new THREE.CylinderGeometry(.07,.12,.9,16),brass,bx,by-.45,-.1);cyl(scene,.07,1.5,brass,bx,by-.85,-.85);
+const ring=add(scene,new THREE.TorusGeometry(.55,.02,8,64),new THREE.MeshBasicMaterial({color:0xffe9b0,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false}),bx,by+.25,.3);
+ring.castShadow=ring.receiveShadow=false;flash.position.set(bx,by+.3,1.5);
+// omino: manovelle sulla camma W, bielle fino ai bilancieri delle cosce
+const Hx=3.4,Wx=W1.x,Wy=W1.y,Hy=Wy-.7,hh=.7,LL=Math.sqrt((Wx-Hx)**2+(Wy-Hy)**2-hh*hh);
+const rk=p=>{const dx=Wx+.28*cos(p)-Hx,dy=Wy+.28*sin(p)-Hy,d=Math.hypot(dx,dy);return Math.atan2(dy,dx)-Math.acos(Math.max(-1,Math.min(1,(hh*hh+d*d-LL*LL)/(2*hh*d))))};
+const wc=cyl(scene,.4,.06,copper,Wx,Wy,-.3);[.28,-.28].forEach(x=>cyl(wc,.05,1,steel,x,0,.2));
+const beltT=tex(canv(512,64,g=>{g.fillStyle='#2a2018';g.fillRect(0,0,512,64);g.fillStyle='#6b5337';for(let i=0;i<8;i++)g.fillRect(i*64,0,10,64)}));
+beltT.wrapS=THREE.RepeatWrapping;
+add(scene,new THREE.BoxGeometry(2.6,.12,.7),new THREE.MeshStandardMaterial({map:beltT,roughness:.7,metalness:.3}),Hx,Hy-1.51,0);
+add(scene,new THREE.BoxGeometry(2.9,.14,.9),brass,Hx,Hy-1.65,0);
+const legs=[[.14,brass],[-.14,steel]].map(([z,mt])=>{
+  const g=new THREE.Group();g.position.set(Hx,Hy,z);scene.add(g);
+  bar(mkbar(g,.1,.08,mt,0),0,0,0,-.7);bar(mkbar(g,.05,.05,steel,0),0,0,0,hh);
+  const sh=new THREE.Group();sh.position.set(0,-.7,0);g.add(sh);
+  bar(mkbar(sh,.09,.07,mt,0),0,0,0,-.7);add(sh,new THREE.BoxGeometry(.3,.06,.12),mt,.08,-.72,0);
+  return{g,sh,rod:mkbar(scene,.05,.04,steel,z*1.45)}});
+const up=new THREE.Group();up.position.set(Hx,Hy,0);scene.add(up);
+add(up,new THREE.BoxGeometry(.34,.8,.22),brass,0,.42,0);add(up,new THREE.SphereGeometry(.17,20,14),gold,0,1,0);
+const arms=[.22,-.22].map((z,i)=>{const a=new THREE.Group();a.position.set(0,.75,z);up.add(a);
+  bar(mkbar(a,.07,.07,i?steel:brass,0),0,0,0,-.55);add(a,new THREE.SphereGeometry(.06,10,8),gold,0,-.58,0);return a});
+// polvere
+const NP=320,dp=new Float32Array(NP*3),dv=[];
+for(let i=0;i<NP;i++){dp[i*3]=Math.random()*18-9;dp[i*3+1]=Math.random()*10-5;dp[i*3+2]=Math.random()*11-2;dv.push(.03+Math.random()*.06)}
+const dg=new THREE.BufferGeometry();dg.setAttribute('position',new THREE.BufferAttribute(dp,3));
+const dust=new THREE.Points(dg,new THREE.PointsMaterial({map:tex(canv(32,32,g=>{const r=g.createRadialGradient(16,16,0,16,16,16);r.addColorStop(0,'#fff0d2');r.addColorStop(1,'rgba(255,240,210,0)');g.fillStyle=r;g.fillRect(0,0,32,32)})),size:.08,transparent:true,opacity:.6,depthWrite:false,blending:THREE.AdditiveBlending}));
+dust.frustumCulled=false;scene.add(dust);
+// orologio: tutto deriva da master = pi*s ; scatto di B secondi centrato sugli interi
+const B=.3,T0=performance.now(),d0=new Date(),s0=Math.floor((d0.getHours()*3600+d0.getMinutes()*60+d0.getSeconds())/5)*5;
+let tp=0;
+renderer.setAnimationLoop(()=>{
+  const t=(performance.now()-T0)/1000,dt=Math.min(.1,t-tp);tp=t;
+  const master=PI*(s0+t);
+  const u=master/PI+B/2,n=Math.floor(u),f=u-n,e=f<B?1-(1-f/B)**3:1;
+  const step=n+e,E=step*TAU/60;                 // E: ruota di scappamento, 6° a tick
+  const ts=(master/PI+1-B/2)%5;                  // secondi dall'ultimo colpo
+  gears.forEach(g=>g.me.rotation.z=g.ph+g.k*E);
+  hH.rotation.z=H1.k*E;hM.rotation.z=M1.k*E;hS.rotation.z=B1.k*E;
+  oa.forEach(([g,k])=>g.rotation.z=-k*E);
+  pend.rotation.z=.12*sin(master);
+  // colpo ogni 5 tick
+  sc.rotation.z=Q.k*E;
+  const hop=.1*exp(-ts*10)*Math.abs(sin(ts*14));
+  lv.rotation.z=Math.asin(Math.min(1,.13*lift((step%5)/5)/.75))+hop;
+  const dc=exp(-ts*4.5);
+  bellG.rotation.z=.16*dc*sin(ts*42);bellG.rotation.x=.07*dc*sin(ts*35+1);
+  bellM.emissiveIntensity=2.2*exp(-ts*7);
+  ring.scale.setScalar(1+ts*5);ring.material.opacity=Math.max(0,.9*exp(-ts*5));
+  flash.intensity=40*exp(-ts*9);
+  // passo
+  const aw=W1.k*E;wc.rotation.z=aw;beltT.offset.x=-aw/TAU*.885;
+  let fl=0;
+  legs.forEach((l,i)=>{const p=aw+i*PI,r=rk(p),fx=Math.max(0,-(rk(p+.05)-rk(p-.05))/.1)*1.8;fl+=fx;
+    l.g.rotation.z=r-PI/2;l.sh.rotation.z=-fx;arms[i].rotation.z=-1.1*(r-PI/2);
+    bar(l.rod,Wx+.28*cos(p),Wy+.28*sin(p),Hx+hh*cos(r),Hy+hh*sin(r))});
+  up.position.y=Hy-.025*fl;
+  for(let i=0;i<NP;i++){const j=i*3;dp[j+1]+=dv[i]*dt;if(dp[j+1]>5)dp[j+1]=-5;dp[j]+=sin(t*.5+i)*.0015}
+  dg.attributes.position.needsUpdate=true;
+  // camera: deriva lenta e avvicinamento
+  const z=(13.4-2.2*(1-exp(-t/45)))*Math.max(1,1.75/cam.aspect);
+  cam.position.set(-.4+sin(t*.11)*.9,.3+cos(t*.15)*.4,z);cam.lookAt(-.4+sin(t*.07)*.2,.2,0);
+  renderer.render(scene,cam);
+});
+addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()});
+</script></body></html>

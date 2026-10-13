@@ -1,0 +1,188 @@
+n) {
+    float occ = 0.0;
+    float sca = 1.0;
+    for (int i = 0; i < 5; i++) {
+        float h = 0.02 + 0.12 * float(i) / 4.0;
+        float d = map(p + n * h).x;
+        occ += (h - d) * sca;
+        sca *= 0.9;
+    }
+    return clamp(1.0 - 2.5 * occ, 0.0, 1.0);
+}
+
+// Crepe: l'iso-superficie del rumore 3D, tagliata dalla superficie, da' linee sottili che pulsano
+vec3 lava(vec3 lp) {
+    float n = fbm(lp * 3.5 + vec3(0.0, uTime * 0.08, 0.0));
+    float crack = 1.0 - smoothstep(0.0, 0.03, abs(n - 0.5));
+    float pulse = 0.55 + 0.45 * sin(uTime * 2.6 - lp.y * 4.0);
+    float breathe = 0.75 + 0.25 * sin(uTime * 1.3);
+    return vec3(1.0, 0.36, 0.06) * crack * pulse * breathe * 4.0;
+}
+
+// Illuminazione di un punto: materiale, luce chiave con ombra, cielo, AO, rim, luce della lava
+vec3 shade(vec3 p, vec3 n, vec3 rd, float id, bool hq) {
+    vec3 L = normalize(vec3(0.55, 0.85, 0.35));
+    float ao = calcAO(p, n);
+    float sh = hq ? softShadow(p + n * 0.01, L, 6.0) : 1.0;
+
+    vec3 alb;
+    vec3 rimCol;
+    vec3 emi = vec3(0.0);
+    float rs = 1.0;                                   // forza del rim glow
+    if (id < 1.5) {                                   // pavimento a scacchi
+        vec2 f = floor(p.xz * 1.25);
+        float ch = mod(f.x + f.y, 2.0);
+        alb = mix(vec3(0.04, 0.045, 0.06), vec3(0.42, 0.40, 0.46), ch);
+        rimCol = vec3(0.0);
+        rs = 0.0;
+    } else if (abs(id - 2.0) < 0.5) {                 // sfera argentata
+        alb = vec3(0.90, 0.92, 1.00);
+        rimCol = vec3(0.6, 0.8, 1.0);
+    } else if (abs(id - 3.0) < 0.5) {                 // toro dorato
+        alb = vec3(1.00, 0.72, 0.30);
+        rimCol = vec3(1.0, 0.8, 0.4);
+    } else if (abs(id - 4.0) < 0.5) {                 // box turchese
+        alb = vec3(0.10, 0.72, 0.75);
+        rimCol = vec3(0.3, 1.0, 0.95);
+    } else if (abs(id - 5.0) < 0.5) {                 // capsula rosa
+        alb = vec3(0.95, 0.35, 0.62);
+        rimCol = vec3(1.0, 0.5, 0.8);
+    } else if (abs(id - 6.0) < 0.5) {                 // cilindro viola
+        alb = vec3(0.52, 0.40, 0.98);
+        rimCol = vec3(0.7, 0.5, 1.0);
+    } else {                                          // ottaedro: roccia con crepe di lava
+        alb = vec3(0.06, 0.035, 0.03);
+        emi = lava(octLocal(p));
+        rimCol = vec3(1.0, 0.4, 0.1);
+    }
+
+    float dif = max(dot(n, L), 0.0) * sh;
+    float sk = 0.5 + 0.5 * n.y;                       // luce del cielo
+    vec3 hv = normalize(L - rd);                      // half-vector: L + V, con V = -rd
+    float spe = pow(max(dot(n, hv), 0.0), 64.0) * dif;
+    float fre = pow(clamp(1.0 + dot(n, rd), 0.0, 1.0), 3.0);
+
+    vec3 col = alb * (vec3(1.0, 0.94, 0.85) * 1.6 * dif + vec3(0.22, 0.28, 0.45) * sk * ao);
+    col += vec3(1.0) * spe * 1.5;
+    col += rimCol * fre * rs * ao * 0.9;
+
+    // Luce calda della lava sulle superfici vicine
+    vec3 lv = cOct() - p;
+    float dl = max(length(lv), 0.001);
+    col += vec3(1.0, 0.4, 0.1) * max(dot(n, lv / dl), 0.0) * ao * 1.2 / (1.0 + 3.0 * dl * dl);
+    return col + emi;
+}
+
+// Quanto il materiale riflette: pavimento e sfera
+float reflectivity(float id) {
+    if (id < 1.5) return 0.55;
+    if (abs(id - 2.0) < 0.5) return 0.8;
+    return 0.0;
+}
+
+// Campo stellare: una stella per cella di direzione, solo in circa il 3% delle celle
+vec3 stars(vec3 rd) {
+    vec3 g = floor(rd * 90.0);
+    if (hash13(g) < 0.97) return vec3(0.0);
+    vec3 jit = vec3(hash13(g + 7.1), hash13(g + 3.7), hash13(g + 1.3));
+    vec3 sp = normalize(g + 0.25 + 0.5 * jit);        // posizione dentro la cella, sulla sfera
+    float d = length(rd - sp);
+    float tw = 0.7 + 0.3 * sin(uTime * (1.0 + 2.0 * jit.y) + 40.0 * jit.z);
+    return vec3(0.8, 0.9, 1.0) * (1.0 - smoothstep(0.0, 0.0022, d)) * (0.5 + 1.5 * jit.x) * tw;
+}
+
+// Scintille: distanza minima tra ciascuna scintilla e il raggio; tmax le tiene dietro agli oggetti
+vec3 sparks(vec3 ro, vec3 rd, float tmax) {
+    vec3 acc = vec3(0.0);
+    for (int i = 0; i < 18; i++) {
+        float fi = float(i);
+        float life = fract(fi * 0.0571 + uTime * (0.05 + 0.05 * fract(fi * 0.37)));
+        float th = fi * 2.399 + uTime * 0.15 * (0.5 + fract(fi * 0.7));
+        float rr = 1.3 + 1.1 * fract(fi * 0.37);
+        vec3 sp = vec3(cos(th) * rr, -1.1 + 3.4 * life, sin(th) * rr);
+        vec3 w = sp - ro;
+        float tc = dot(w, rd);
+        if (tc > 0.0 && tc < tmax) {
+            float d = length(w - rd * tc);
+            acc += vec3(1.0, 0.62, 0.28) * sin(life * PI) * 0.0004 / (d * d + 0.0008);
+        }
+    }
+    return acc;
+}
+
+// Sfondo: gradiente, bagliore d'orizzonte, stelle
+vec3 background(vec3 rd) {
+    float up = clamp(rd.y, 0.0, 1.0);
+    vec3 sky = mix(FOG, vec3(0.01, 0.012, 0.035), sqrt(up));
+    sky += vec3(0.5, 0.2, 0.12) * exp(-up * 7.0) * 0.35;
+    return sky + stars(rd);
+}
+
+// Nebbia esponenziale quadratica: sfuma verso il colore dell'orizzonte
+vec3 applyFog(vec3 c, float t) {
+    return mix(c, FOG, 1.0 - exp(-t * t * 0.012));
+}
+
+// Primario, poi un solo rimbalzo di riflessione, poi scintille
+vec3 render(vec3 ro, vec3 rd) {
+    vec2 h = trace(ro, rd, 30.0);
+    vec3 col;
+    float tHit = 30.0;
+    if (h.y < 0.0) {
+        col = background(rd);
+    } else {
+        tHit = h.x;
+        vec3 p = ro + rd * h.x;
+        vec3 n = calcNormal(p);
+        col = shade(p, n, rd, h.y, true);
+
+        // Un solo rimbalzo: il riflesso viene illuminato senza riflettere di nuovo
+        float rf = reflectivity(h.y);
+        if (rf > 0.0) {
+            vec3 po = p + n * 0.02;
+            vec3 rdr = reflect(rd, n);
+            vec2 hr = trace(po, rdr, 20.0);
+            vec3 rc = background(rdr);
+            if (hr.y > 0.0) {
+                vec3 pr = po + rdr * hr.x;
+                rc = applyFog(shade(pr, calcNormal(pr), rdr, hr.y, false), hr.x);
+            }
+            float F = 0.04 + 0.96 * pow(clamp(1.0 + dot(n, rd), 0.0, 1.0), 5.0);
+            col = mix(col, rc, rf * (0.35 + 0.65 * F));
+        }
+        col = applyFog(col, h.x);
+    }
+    return col + sparks(ro, rd, tHit);
+}
+
+// ACES filmico (fit di Narkowicz)
+vec3 aces(vec3 x) {
+    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
+
+void main() {
+    vec2 q = gl_FragCoord.xy / uRes;                  // 0..1, per la vignettatura
+    vec2 uv = (gl_FragCoord.xy * 2.0 - uRes) / uRes.y;
+
+    // Camera: curva periodica (somma di armoniche) con orbita, discesa e salita
+    float a = uTime * 0.12;
+    float R = 4.0 + 0.8 * sin(2.0 * a);               // il raggio respira
+    float H = 0.9 + 1.5 * sin(a - 0.5);               // scende quasi al pavimento, poi risale
+    vec3 ro = vec3(R * cos(a) + 0.4 * cos(3.0 * a), H, R * sin(a) + 0.4 * sin(2.0 * a));
+    vec3 ta = vec3(0.0, 0.2 + 0.35 * sin(1.7 * a), 0.0);   // punto guardato, con beccheggio
+
+    vec3 ww = normalize(ta - ro);
+    vec3 uu = normalize(cross(ww, vec3(0.0, 1.0, 0.0)));
+    vec3 vv = cross(uu, ww);
+    vec3 rd = normalize(uv.x * uu + uv.y * vv + 1.7 * ww);   // 1.7: lunghezza focale
+
+    vec3 col = render(ro, rd);
+
+    // Tone mapping filmico (ACES), gamma 2.2, vignettatura
+    col = aces(col * 1.1);
+    col = pow(col, vec3(1.0 / 2.2));
+    float vig = pow(16.0 * q.x * (1.0 - q.x) * q.y * (1.0 - q.y), 0.3);
+    col *= mix(0.35, 1.0, vig);
+    gl_FragColor = vec4(col, 1.0);
+}
+</script>

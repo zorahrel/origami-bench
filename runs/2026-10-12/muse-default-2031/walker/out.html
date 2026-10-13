@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Humanoid Walk</title>
+<style>
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#0b0e17}
+canvas{display:block;width:100%;height:100%}
+#tag{position:fixed;left:12px;top:10px;color:#fff;font:12px/1.4 system-ui,sans-serif;opacity:.7;pointer-events:none}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+</head>
+<body>
+<div id="tag">articulated humanoid · walking in place</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x0b0e17);
+scene.fog=new THREE.Fog(0x0b0e17,9,24);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,0.1,100);
+function checkerTexture(){
+const c=document.createElement('canvas');c.width=c.height=256;
+const g=c.getContext('2d');
+g.fillStyle='#e8e8ee';g.fillRect(0,0,256,256);
+g.fillStyle='#2b3246';g.fillRect(0,0,128,128);g.fillRect(128,128,128,128);
+const t=new THREE.CanvasTexture(c);
+t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(14,14);
+t.anisotropy=8;t.colorSpace=THREE.SRGBColorSpace;return t;
+}
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(32,32),new THREE.MeshStandardMaterial({map:checkerTexture(),roughness:.9,metalness:0}));
+floor.rotation.x=-Math.PI/2;floor.receiveShadow=true;scene.add(floor);
+scene.add(new THREE.HemisphereLight(0xbfd4ff,0x222233,.55));
+const sun=new THREE.DirectionalLight(0xffffff,2.0);
+sun.position.set(4,7,3);sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-5;sun.shadow.camera.right=5;
+sun.shadow.camera.top=6;sun.shadow.camera.bottom=-4;
+sun.shadow.camera.far=25;sun.shadow.bias=-0.0004;
+scene.add(sun);
+const glow=new THREE.PointLight(0xff4fd8,18,12,1.8);
+glow.position.set(-2.2,2.2,-1.5);scene.add(glow);
+const rim=new THREE.PointLight(0x33ccff,10,12,1.8);
+rim.position.set(2.4,1.2,-2.2);scene.add(rim);
+const skin=new THREE.MeshStandardMaterial({color:0xe8b88a,roughness:.6});
+const shirt=new THREE.MeshStandardMaterial({color:0x3a7bd5,roughness:.7});
+const pants=new THREE.MeshStandardMaterial({color:0x2b2f3a,roughness:.8});
+const shoeM=new THREE.MeshStandardMaterial({color:0xd23c3c,roughness:.6});
+function M(geo,mat,x=0,y=0,z=0){const m=new THREE.Mesh(geo,mat);m.position.set(x,y,z);m.castShadow=true;return m;}
+const root=new THREE.Group();root.position.y=1.02;scene.add(root);
+const hips=M(new THREE.BoxGeometry(.34,.18,.22),pants,0,0,0);root.add(hips);
+const torsoG=new THREE.Group();torsoG.position.y=.09;root.add(torsoG);
+const torso=M(new THREE.BoxGeometry(.4,.52,.24),shirt,0,.3,0);torsoG.add(torso);
+const chest=M(new THREE.BoxGeometry(.44,.16,.26),shirt,0,.5,0);torsoG.add(chest);
+const neckG=new THREE.Group();neckG.position.y=.6;torsoG.add(neckG);
+neckG.add(M(new THREE.CylinderGeometry(.06,.06,.1,16),skin,0,.03,0));
+const headG=new THREE.Group();headG.position.y=.14;neckG.add(headG);
+headG.add(M(new THREE.SphereGeometry(.155,24,18),skin,0,.12,0));
+headG.add(M(new THREE.BoxGeometry(.1,.05,.02),skin,0,.1,.15));
+headG.add(M(new THREE.SphereGeometry(.05,12,10),new THREE.MeshStandardMaterial({color:0x222222}),-.06,.15,.11));
+headG.add(M(new THREE.SphereGeometry(.05,12,10),new THREE.MeshStandardMaterial({color:0x222222}),.06,.15,.11));
+function buildArm(side){
+const s=new THREE.Group();s.position.set(.27*side,.5,0);torsoG.add(s);
+s.add(M(new THREE.SphereGeometry(.07,14,12),shirt,0,0,0));
+const up=M(new THREE.CapsuleGeometry(.06,.22,6,12),shirt,0,-.17,0);s.add(up);
+const e=new THREE.Group();e.position.set(0,-.32,0);s.add(e);
+e.add(M(new THREE.SphereGeometry(.055,12,10),skin,0,0,0));
+e.add(M(new THREE.CapsuleGeometry(.05,.2,6,12),skin,0,-.15,0));
+const hand=M(new THREE.SphereGeometry(.07,14,12),skin,0,-.32,0);hand.scale.set(.8,1.15,.9);e.add(hand);
+return{sh:s,el:e};
+}
+function buildLeg(side){
+const h=new THREE.Group();h.position.set(.11*side,-.08,0);root.add(h);
+h.add(M(new THREE.SphereGeometry(.075,14,12),pants,0,0,0));
+h.add(M(new THREE.CapsuleGeometry(.075,.26,6,12),pants,0,-.2,0));
+const k=new THREE.Group();k.position.set(0,-.42,0);h.add(k);
+k.add(M(new THREE.SphereGeometry(.06,12,10),skin,0,0,0));
+k.add(M(new THREE.CapsuleGeometry(.06,.26,6,12),skin,0,-.19,0));
+const f=M(new THREE.BoxGeometry(.11,.07,.26),shoeM,0,-.4,.06);k.add(f);
+return{hip:h,knee:k};
+}
+const armL=buildArm(-1),armR=buildArm(1);
+const legL=buildLeg(-1),legR=buildLeg(1);
+armL.sh.position.z=0;armR.sh.position.z=0;
+const clock=new THREE.Clock();
+let camA=0.6;
+function animate(){
+requestAnimationFrame(animate);
+const dt=Math.min(clock.getDelta(),.05),t=clock.elapsedTime;
+const w=5.2,p=t*w;
+const sL=Math.sin(p),sR=Math.sin(p+Math.PI);
+legL.hip.rotation.x=sL*.62;legR.hip.rotation.x=sR*.62;
+legL.knee.rotation.x=Math.max(0,-Math.sin(p-.6))*1.15+0.08;
+legR.knee.rotation.x=Math.max(0,-Math.sin(p+Math.PI-.6))*1.15+0.08;
+armL.sh.rotation.x=sR*.55;armR.sh.rotation.x=sL*.55;
+armL.sh.rotation.z=.12+Math.sin(p)*.03;armR.sh.rotation.z=-.12-Math.sin(p)*.03;
+armL.el.rotation.x=-.35-Math.max(0,sR)*.7;
+armR.el.rotation.x=-.35-Math.max(0,sL)*.7;
+legL.hip.rotation.z=.04;legR.hip.rotation.z=-.04;
+root.position.y=1.02+Math.abs(Math.cos(p))*.055;
+root.rotation.y=Math.sin(p)*.05;
+torsoG.rotation.y=Math.sin(p)*.18;
+torsoG.rotation.x=.06+Math.sin(p*2)*.02;
+torsoG.position.y=.09+Math.abs(Math.cos(p))*.02;
+headG.rotation.y=-Math.sin(p)*.22;
+headG.rotation.x=Math.sin(p*2)*.04;
+glow.intensity=16+Math.sin(t*2.3)*4;
+rim.intensity=9+Math.cos(t*1.7)*3;
+camA+=dt*.32;
+const r=4.2;
+camera.position.set(Math.sin(camA)*r,1.7+Math.sin(t*.7)*.25,Math.cos(camA)*r);
+camera.lookAt(0,1.05,0);
+renderer.render(scene,camera);
+}
+animate();
+addEventListener('resize',()=>{
+camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>

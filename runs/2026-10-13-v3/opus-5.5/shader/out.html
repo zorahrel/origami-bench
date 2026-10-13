@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Lava Garden · SDF Raymarcher</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#000}
+canvas{display:block;position:fixed;inset:0;width:100vw;height:100vh}
+</style>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const VS = `void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+
+const FS = `
+uniform float uTime;
+uniform vec2 uRes;
+uniform vec3 uRo;
+uniform vec3 uTa;
+
+#define T uTime
+#define ZERO min(int(uTime), 0)
+#define TMAX 60.0
+
+const vec3 L = vec3(-0.6247, 0.4685, -0.6247);
+const vec3 BOXC = vec3(4.6, 1.35, 2.2);
+const vec3 CYLC = vec3(-4.0, 0.9, 1.8);
+const vec3 OCTC = vec3(0.4, 1.7, -4.2);
+
+// stato dell'animazione: calcolato una volta per pixel in setup(), non a ogni passo
+vec3 cC, s0, s1, s2, kA, kB;
+mat2 cR1, cR2, tR1, tR2, bR1, bR2, oR1, oR2;
+float cMo, tRad, dY, oRad, pulse;
+vec4 gM; // materiale dell'ultimo punto valutato: rgb albedo, a riflettivita
+
+float hash(vec3 p){
+  p = fract(p*0.3183099 + 0.1)*17.0;
+  return fract(p.x*p.y*p.z*(p.x + p.y + p.z));
+}
+float vnoise(vec3 x){
+  vec3 i = floor(x), f = fract(x);
+  f = f*f*(3.0 - 2.0*f);
+  return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x),
+                 mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x),
+                 mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+mat2 rot(float a){ float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
+
+float sdTorus(vec3 p, vec2 t){ return length(vec2(length(p.xz) - t.x, p.y)) - t.y; }
+float sdBox(vec3 p, vec3 b, float r){
+  vec3 q = abs(p) - b + r;
+  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - r;
+}
+float sdCapsule(vec3 p, vec3 a, vec3 b, float r){
+  vec3 pa = p - a, ba = b - a;
+  return length(pa - ba*clamp(dot(pa, ba)/dot(ba, ba), 0.0, 1.0)) - r;
+}
+float sdCyl(vec3 p, float h, float r){
+  vec2 d = abs(vec2(length(p.xz), p.y)) - vec2(r, h);
+  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
+}
+float sdOcta(vec3 p, float s){ p = abs(p); return (p.x + p.y + p.z - s)*0.57735027; }
+
+vec3 sat(float i){
+  float a = T*(0.6 + 0.15*i) + i*2.094;
+  float r = 1.5 + 0.9*sin(T*0.8 + i*1.7);
+  return vec3(cos(a)*r, 0.6*sin(T*1.1 + i*2.0), sin(a)*r);
+}
+void setup(){
+  cC = vec3(0.0, 2.0 + 0.15*sin(T*1.3), 0.0);
+  cR1 = rot(T*0.35); cR2 = rot(T*0.23);
+  cMo = 0.5 + 0.5*sin(T*0.6);
+  tR1 = rot(T*0.3); tR2 = rot(0.5 + 0.25*sin(T*0.5));
+  tRad = 1.8 + 0.2*sin(T*0.9);
+  s0 = sat(0.0); s1 = sat(1.0); s2 = sat(2.0);
+  bR1 = rot(T*0.6); bR2 = rot(T*0.37);
+  vec3 ax = vec3(cos(T*0.3), 0.0, sin(T*0.3));
+  kA = ax*(sin(T*0.9) - 0.8); kB = ax*(sin(T*0.9) + 0.8);
+  dY = 1.35 + abs(sin(T*1.7));
+  oR1 = rot(T*0.8); oR2 = rot(T*0.5);
+  oRad = 0.55 + 0.22*sin(T*1.5);
+  pulse = 0.7 + 0.3*sin(T*2.5);
+}
+vec3 coreQ(vec3 p){ vec3 q = p - cC; q.xz *= cR1; q.xy *= cR2; return q; }
+float coreD(vec3 q){ return mix(length(q) - 1.0, sdOcta(q, 1.45), cMo); }
+
+// smooth-min che fonde anche il materiale
+float U(float d, float d2, vec4 m2, float k){
+  float h = clamp(0.5 + 0.5*(d2 - d)/k, 0.0, 1.0);
+  gM = mix(m2, gM, h);
+  return mix(d2, d, h) - k*h*(1.0 - h);
+}
+
+// solo oggetti: il pavimento y=0 si interseca analiticamente.
+// ogni gruppo ha una sfera di contorno, da lontano basta quella
+float map(vec3 p){
+  float d = 1e3;
+  gM = vec4(0.0);
+  vec3 q = p - cC;
+  float b = length(q) - 3.1;
+  if (b > 1.0) d = b;
+  else {
+    d = U(d, coreD(coreQ(p)), vec4(0.06, 0.045, 0.04, 0.12), 0.01);
+    vec3 r = q; r.xz *= tR1; r.yz *= tR2;
+    d = U(d, sdTorus(r, vec2(tRad, 0.16)), vec4(1.0, 0.68, 0.28, 0.8), 0.45);
+    d = U(d, length(q - s0) - 0.3, vec4(0.92, 0.94, 1.0, 0.9), 0.5);
+    d = U(d, length(q - s1) - 0.3, vec4(0.92, 0.94, 1.0, 0.9), 0.5);
+    d = U(d, length(q - s2) - 0.3, vec4(0.92, 0.94, 1.0, 0.9), 0.5);
+  }
+  q = p - BOXC;
+  b = length(q) - 2.3;
+  if (b > 1.0) d = min(d, b);
+  else {
+    vec3 r = q; r.xz *= bR1; r.xy *= bR2;
+    d = U(d, sdBox(r, vec3(0.6), 0.12), vec4(0.08, 0.7, 0.6, 0.35), 0.02);
+    d = U(d, sdCapsule(q, kA, kB, 0.28), vec4(0.95, 0.12, 0.45, 0.4), 0.35);
+  }
+  q = p - CYLC;
+  b = length(q - vec3(0.0, 0.8, 0.0)) - 2.2;
+  if (b > 1.0) d = min(d, b);
+  else {
+    d = U(d, sdCyl(q, 0.86, 0.46) - 0.04, vec4(0.08, 0.18, 0.85, 0.3), 0.02);
+    d = U(d, length(q - vec3(0.0, dY, 0.0)) - 0.38, vec4(0.2, 0.85, 1.0, 0.5), 0.55);
+  }
+  q = p - OCTC;
+  b = length(q) - 1.3;
+  if (b > 1.0) d = min(d, b);
+  else {
+    q.xz *= oR1; q.xy *= oR2;
+    d = U(d, sdOcta(q, 1.0), vec4(0.92, 0.9, 0.85, 0.45), 0.02);
+    d = U(d, length(q) - oRad, vec4(1.0, 0.35, 0.1, 0.3), 0.12);
+  }
+  return d;
+}
+
+vec3 nrm(vec3 p){
+  vec3 n = vec3(0.0);
+  for (int i = ZERO; i < 4; i++){
+    vec3 e = 0.5773*(2.0*vec3((((i + 3) >> 1) & 1), ((i >> 1) & 1), (i & 1)) - 1.0);
+    n += e*map(p + 0.001*e);
+  }
+  return normalize(n);
+}
+
+float march(vec3 ro, vec3 rd, float tm){
+  float t = 0.0, h = 1.0;
+  for (int i = ZERO; i < 110; i++){
+    h = map(ro + rd*t);
+    if (h < 0.0005*t + 0.0003 || t > tm) break;
+    t += h;
+  }
+  return h < 0.01 ? t : 1e5;
+}
+
+float shadow(vec3 ro, vec3 rd){
+  float res = 1.0, t = 0.02;
+  for (int i = ZERO; i < 36; i++){
+    float h = map(ro + rd*t);
+    res = min(res, 10.0*h/t);
+    t += clamp(h, 0.02, 0.6);
+    if (res < 0.004 || t > 14.0) break;
+  }
+  res = clamp(res, 0.0, 1.0);
+  return res*res*(3.0 - 2.0*res);
+}
+
+float calcAO(vec3 p, vec3 n){
+  float o = 0.0, s = 1.0;
+  for (int i = ZERO; i < 5; i++){
+    float h = 0.02 + 0.11*float(i);
+    vec3 x = p + n*h;
+    o += (h - min(map(x), x.y))*s;
+    s *= 0.9;
+  }
+  return clamp(1.0 - 2.0*o, 0.0, 1.0);
+}
+
+vec3 skyGrad(vec3 rd){
+  vec3 c = mix(vec3(0.12, 0.07, 0.15), vec3(0.008, 0.012, 0.035), smoothstep(-0.05, 0.5, rd.y));
+  return c + vec3(0.3, 0.35, 0.6)*pow(max(dot(rd, L), 0.0), 10.0)*0.25;
+}
+vec3 sky(vec3 rd){
+  vec3 c = skyGrad(rd) + vec3(1.0, 0.95, 0.85)*smoothstep(0.9993, 0.9996, dot(rd, L))*5.0;
+  vec3 q = rd*160.0;
+  float h = hash(floor(q));
+  if (h > 0.975){
+    float s = 1.0 - smoothstep(0.0, 0.32, length(fract(q) - 0.5));
+    c += mix(vec3(0.6, 0.7, 1.0), vec3(1.0, 0.8, 0.6), fract(h*31.0))*s*(0.6 + 0.4*sin(T*3.0 + h*80.0))*smoothstep(0.0, 0.12, rd.y)*2.0;
+  }
+  return c;
+}
+
+// crepe: isolinea 0.5 di un fbm di value noise
+float cracks(vec3 q){
+  float n = 0.6*vnoise(q*2.5) + 0.28*vnoise(q*5.3 + 7.1) + 0.12*vnoise(q*11.0 + 3.7);
+  float a = abs(n - 0.5);
+  return (1.0 - smoothstep(0.0, 0.03, a)) + 0.4*(1.0 - smoothstep(0.0, 0.1, a));
+}
+
+// bagliore di una particella: distanza minima tra raggio primario e punto
+float orb(vec3 sp, vec3 rd, float tmax, float s){
+  vec3 w = sp - uRo;
+  float tp = dot(w, rd);
+  if (tp < 0.0 || tp > tmax) return 0.0;
+  s += 0.0015*tp;
+  return s*s/(max(dot(w, w) - tp*tp, 0.0) + s*s);
+}
+
+void main(){
+  setup();
+  vec2 uv = (2.0*gl_FragCoord.xy - uRes)/uRes.y;
+  vec3 ww = normalize(uTa - uRo);
+  vec3 uu = normalize(cross(ww, vec3(0.0, 1.0, 0.0)));
+  vec3 vv = cross(uu, ww);
+  vec3 rd0 = normalize(uv.x*uu + uv.y*vv + 1.7*ww);
+  vec3 ro = uRo, rd = rd0, col = vec3(0.0), thr = vec3(1.0);
+  float t0 = 1e4;
+
+  // due passaggi: vista diretta + un rimbalzo di riflessione
+  for (int bn = ZERO; bn < 2; bn++){
+    float tf = rd.y < 0.0 ? -ro.y/rd.y : 1e4;
+    float t = march(ro, rd, min(tf, TMAX));
+    bool fl = t >= tf;
+    if (fl) t = tf;
+    if (t >= TMAX){ col += thr*sky(rd); break; }
+    if (bn == 0) t0 = t;
+    vec3 p = ro + rd*t, n = vec3(0.0, 1.0, 0.0), alb = vec3(0.5), emi = vec3(0.0);
+    float rf = 0.3;
+    if (fl){
+      // scacchiera col bordo ammorbidito con la distanza
+      float w = 0.02 + 0.012*t;
+      float ch = smoothstep(-w, w, sin(p.x*3.1416)*sin(p.z*3.1416));
+      alb = mix(vec3(0.012), vec3(0.72, 0.7, 0.68), ch);
+      rf = mix(0.6, 0.12, ch);
+    } else {
+      n = nrm(p);
+      map(p);
+      alb = gM.rgb; rf = gM.a;
+      vec3 q = coreQ(p);
+      float lv = 1.0 - smoothstep(0.0, 0.15, coreD(q));
+      if (lv > 0.0){
+        float cr = cracks(q)*lv;
+        float e = cr*pulse*(0.55 + 0.45*sin(T*3.0 - (p.y - cC.y)*4.0));
+        emi = (vec3(1.0, 0.22, 0.03) + vec3(1.0, 0.75, 0.25)*e)*e*4.0;
+        alb *= 1.0 - min(cr, 1.0);
+      }
+    }
+    float occ = calcAO(p, n);
+    float dif = clamp(dot(n, L), 0.0, 1.0);
+    if (dif > 0.0) dif *= shadow(p + n*0.01, L);
+    float spe = pow(clamp(dot(n, normalize(L - rd)), 0.0, 1.0), 64.0)*dif;
+    float nv = clamp(dot(n, -rd), 0.0, 1.0);
+    float fre = pow(1.0 - nv, 5.0);
+    vec3 lp = cC - p;
+    float ll = dot(lp, lp);
+    float ldf = clamp(dot(n, lp*inversesqrt(ll)), 0.0, 1.0)*pulse*6.0/(1.0 + ll);
+    vec3 amb = mix(vec3(0.05, 0.03, 0.04), vec3(0.11, 0.13, 0.24), 0.5 + 0.5*n.y)*occ;
+    vec3 c = alb*(dif*vec3(1.3, 1.25, 1.45) + amb + ldf*vec3(1.0, 0.38, 0.1)*occ) + spe*(0.4 + rf)*vec3(1.4, 1.35, 1.5) + emi;
+    if (!fl) c += pow(1.0 - nv, 3.0)*mix(vec3(0.2, 0.4, 1.0), vec3(1.0, 0.35, 0.08), clamp(5.0/(1.0 + ll), 0.0, 1.0))*0.5*occ;
+    float fo = 1.0 - exp(-0.0009*t*t);
+    float kr = bn == 0 ? mix(rf*0.8, 1.0, fre*0.85) : 0.0;
+    col += thr*mix(c*(1.0 - kr), skyGrad(rd), fo);
+    thr *= (1.0 - fo)*kr*mix(vec3(1.0), alb, smoothstep(0.6, 0.9, rf));
+    ro = p + n*0.02;
+    rd = reflect(rd, n);
+  }
+
+  // alone caldo attorno al nucleo
+  vec3 wc = cC - uRo;
+  float tp = dot(wc, rd0);
+  col += vec3(1.0, 0.32, 0.06)*pulse*0.35*step(0.0, tp)/(1.0 + 1.5*max(dot(wc, wc) - tp*tp, 0.0))*smoothstep(-1.0, 1.0, t0 - tp);
+
+  // scintille che salgono dalla lava
+  for (int i = ZERO; i < 24; i++){
+    float fi = float(i);
+    float h1 = hash(vec3(fi, 1.3, 7.1)), h2 = hash(vec3(fi, 3.7, 1.9));
+    float life = fract(T*(0.1 + 0.08*h1) + h2);
+    float a = fi*2.4 + life*(2.0 + 2.0*h1);
+    float r = 0.7 + life*(2.0 + 3.0*h2);
+    vec3 sp = cC + vec3(cos(a)*r, life*5.5 - 0.6 + h1, sin(a)*r);
+    col += mix(vec3(1.0, 0.3, 0.05), vec3(1.0, 0.8, 0.35), h2)*orb(sp, rd0, t0, 0.02)*(1.0 - life)*smoothstep(0.0, 0.1, life)*3.0;
+  }
+  // pulviscolo freddo sospeso
+  for (int i = ZERO; i < 16; i++){
+    float fi = float(i);
+    vec3 h = vec3(hash(vec3(fi, 5.1, 2.3)), hash(vec3(fi, 8.2, 4.4)), hash(vec3(fi, 1.7, 9.6)));
+    vec3 sp = vec3((h.x - 0.5)*16.0 + sin(T*0.3 + fi)*0.8, 0.5 + h.y*4.0 + sin(T*0.5 + fi*1.3)*0.4, (h.z - 0.5)*16.0 + cos(T*0.25 + fi)*0.8);
+    col += vec3(0.4, 0.6, 1.0)*orb(sp, rd0, t0, 0.012)*(0.5 + 0.5*sin(T*2.0 + fi*3.0));
+  }
+
+  col = max(col*0.95, 0.0);
+  col = (col*(2.51*col + 0.03))/(col*(2.43*col + 0.59) + 0.14);
+  col = pow(clamp(col, 0.0, 1.0), vec3(0.4545));
+  vec2 v = gl_FragCoord.xy/uRes;
+  col *= 0.3 + 0.7*pow(16.0*v.x*v.y*(1.0 - v.x)*(1.0 - v.y), 0.22);
+  col += (hash(vec3(gl_FragCoord.xy, fract(T)*91.0)) - 0.5)/255.0;
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+document.body.appendChild(renderer.domElement);
+
+const uniforms = {
+  uTime: { value: 0 },
+  uRes: { value: new THREE.Vector2(1, 1) },
+  uRo: { value: new THREE.Vector3() },
+  uTa: { value: new THREE.Vector3() }
+};
+const scene = new THREE.Scene();
+const camera = new THREE.Camera();
+const quad = new THREE.Mesh(
+  new THREE.PlaneGeometry(2, 2),
+  new THREE.ShaderMaterial({ uniforms, vertexShader: VS, fragmentShader: FS, depthTest: false, depthWrite: false })
+);
+quad.frustumCulled = false;
+scene.add(quad);
+
+// percorso chiuso: giro alto, picchiata tra gli oggetti, risalita
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+const camPath = new THREE.CatmullRomCurve3([
+  V(0, 4.5, 10), V(8, 3, 6.5), V(8.3, 1.2, -1), V(3, 0.8, -6.5),
+  V(-3, 2.2, -7.5), V(-8, 5.5, -1), V(-6, 1.0, 4.5), V(-1.5, 0.9, 6.5)
+], true, 'centripetal');
+const lookPath = new THREE.CatmullRomCurve3([
+  V(0, 1.8, 0), V(1.5, 1.6, 0.5), V(4.6, 1.3, 2.2), V(0.4, 1.6, -4.2),
+  V(0, 2.0, 0), V(-4.0, 1.6, 1.8), V(-1.0, 1.4, 1.0), V(0, 2.2, 0)
+], true, 'centripetal');
+
+let pr = Math.min(window.devicePixelRatio || 1, 1);
+function resize() {
+  renderer.setPixelRatio(pr);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.getDrawingBufferSize(uniforms.uRes.value);
+}
+window.addEventListener('resize', resize);
+resize();
+
+const start = performance.now();
+let last = start, warm = 30, n = 0, acc = 0;
+renderer.setAnimationLoop(() => {
+  const now = performance.now(), dt = now - last;
+  last = now;
+  // se la GPU non regge si abbassa la risoluzione, mai sotto 0.5
+  if (warm > 0) warm--;
+  else if (dt < 250) {
+    acc += dt;
+    if (++n === 40) {
+      if (acc / n > 28 && pr > 0.5) { pr = Math.max(0.5, pr * 0.8); resize(); warm = 10; }
+      n = 0; acc = 0;
+    }
+  }
+  const t = (now - start) / 1000;
+  const u = (t / 46) % 1;
+  uniforms.uTime.value = t;
+  camPath.getPoint(u, uniforms.uRo.value);
+  lookPath.getPoint(u, uniforms.uTa.value);
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

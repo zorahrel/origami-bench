@@ -1,0 +1,1 @@
+{"score": 1, "why": "All 8 frames are identical and show a close-up of GLSL source code, not a rendered image, so nothing moves and no scene is visible. The SDF primitives, morphing, floor, shadows, lava, particles, and camera flight are all missing from the frames. The code text itself does not count toward the score."}

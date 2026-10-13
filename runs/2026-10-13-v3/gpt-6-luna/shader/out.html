@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Molten Orbit</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050711}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+</style>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const vertexShader = `
+varying vec2 vUv;
+void main(){
+  vUv=uv;
+  gl_Position=vec4(position.xy,0.0,1.0);
+}`;
+
+const fragmentShader = `
+precision highp float;
+varying vec2 vUv;
+uniform vec2 iResolution;
+uniform float iTime;
+
+const float PI=3.14159265359;
+
+mat2 rot(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}
+float sdSphere(vec3 p,float r){return length(p)-r;}
+float sdBox(vec3 p,vec3 b){
+  vec3 q=abs(p)-b;
+  return length(max(q,0.0))+min(max(q.x,max(q.y,q.z)),0.0);
+}
+float sdTorus(vec3 p,vec2 t){return length(vec2(length(p.xz)-t.x,p.y))-t.y;}
+float sdCapsule(vec3 p,vec3 a,vec3 b,float r){
+  vec3 pa=p-a, ba=b-a;
+  float h=clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0);
+  return length(pa-ba*h)-r;
+}
+float sdCylinder(vec3 p,vec2 h){
+  vec2 d=abs(vec2(length(p.xz),p.y))-h;
+  return min(max(d.x,d.y),0.0)+length(max(d,0.0));
+}
+float sdOctahedron(vec3 p,float s){
+  p=abs(p);
+  float m=p.x+p.y+p.z-s;
+  vec3 q;
+  if(3.0*p.x<m) q=p.xyz;
+  else if(3.0*p.y<m) q=p.yzx;
+  else if(3.0*p.z<m) q=p.zxy;
+  else return m*0.57735027;
+  float k=clamp(0.5*(q.z-q.y+s),0.0,s);
+  return length(vec3(q.x,q.y-s+k,q.z-k));
+}
+float smin(float a,float b,float k){
+  float h=clamp(0.5+0.5*(b-a)/k,0.0,1.0);
+  return mix(b,a,h)-k*h*(1.0-h);
+}
+vec3 mainCenter(float t){return vec3(0.0,0.08+0.12*sin(t*0.8),0.0);}
+
+float morphShape(vec3 p,float t){
+  float pulse=sin(t*0.9);
+  float d=sdSphere(p,0.66+0.07*sin(t*0.7));
+  float k=0.30+0.12*(0.5+0.5*sin(t*0.65));
+  float b=sdTorus(rot(0.38*sin(t*0.55))*(p-vec3(0.08*sin(t*0.7),0.04*cos(t*0.8),0.0)),vec2(0.61,0.17+0.04*cos(t)));
+  d=smin(d,b,k);
+  b=sdBox(rot(0.55*sin(t*0.42))*(p-vec3(0.12*cos(t*0.8),0.02,0.04*sin(t))),vec3(0.43,0.45,0.43));
+  d=smin(d,b,k);
+  b=sdCapsule(rot(0.5+0.48*sin(t*0.6))*(p-vec3(-0.04,0.04,0.02)),vec3(0.0,-0.48,0.0),vec3(0.0,0.48,0.0),0.22);
+  d=smin(d,b,k);
+  b=sdCylinder(rot(0.7*cos(t*0.5))*(p-vec3(0.02,-0.02,0.0)),vec2(0.37,0.48+0.04*pulse));
+  d=smin(d,b,k);
+  b=sdOctahedron(rot(0.45*sin(t*0.75))*(p-vec3(0.0,0.02,-0.04)),0.70+0.05*cos(t*0.6));
+  return smin(d,b,k);
+}
+vec2 mapScene(vec3 p,float t){
+  vec3 q=p-mainCenter(t);
+  float d=morphShape(q,t);
+  float id=1.0;
+
+  vec3 a=p-vec3(1.95*cos(t*0.43),0.12+0.16*sin(t*0.8),1.65*sin(t*0.43));
+  float b=sdTorus(rot(0.8+0.4*sin(t*0.6))*a,vec2(0.49,0.105));
+  if(b<d){d=b;id=2.0;}
+
+  vec3 c=p-vec3(2.15*sin(t*0.31+2.0),0.10+0.14*cos(t*0.7),2.0*cos(t*0.31+2.0));
+  b=sdOctahedron(rot(0.5*t)*c,0.45);
+  if(b<d){d=b;id=3.0;}
+
+  vec3 e=p-vec3(2.65*sin(t*0.23+4.0),0.18+0.12*sin(t*0.9+1.0),2.45*cos(t*0.23+4.0));
+  b=sdBox(rot(0.35*cos(t*0.4))*e,vec3(0.31,0.34,0.31));
+  if(b<d){d=b;id=4.0;}
+
+  float floorD=p.y+1.30;
+  if(floorD<d){d=floorD;id=0.0;}
+  return vec2(d,id);
+}
+
+vec2 hash22(vec2 p){
+  vec3 p3=fract(vec3(p.xyx)*vec3(0.1031,0.1030,0.0973));
+  p3+=dot(p3,p3.yzx+33.33);
+  return fract((p3.xx+p3.yz)*p3.zy);
+}
+float voronoiEdge(vec2 x){
+  vec2 n=floor(x),f=fract(x);
+  float d1=10.0,d2=10.0;
+  for(int y=-1;y<=1;y++){
+    for(int x1=-1;x1<=1;x1++){
+      vec2 g=vec2(float(x1),float(y));
+      vec2 r=g+hash22(n+g)-f;
+      float d=dot(r,r);
+      if(d<d1){d2=d1;d1=d;}
+      else if(d<d2){d2=d;}
+    }
+  }
+  return sqrt(d2)-sqrt(d1);
+}
+float lavaVeins(vec3 p,vec3 n,float t){
+  vec3 q=(p-mainCenter(t))*4.1;
+  vec3 w=abs(n);
+  w/=max(w.x+w.y+w.z,0.001);
+  float a=1.0-smoothstep(0.025,0.075,voronoiEdge(q.xy));
+  float b=1.0-smoothstep(0.025,0.075,voronoiEdge(q.yz));
+  float c=1.0-smoothstep(0.025,0.075,voronoiEdge(q.zx));
+  return clamp(a*w.z+b*w.x+c*w.y,0.0,1.0);
+}
+vec3 baseColor(vec3 p,vec3 n,float id,float t){
+  if(id<0.5){
+    float check=mod(floor(p.x*1.75)+floor(p.z*1.75),2.0);
+    return mix(vec3(0.018,0.026,0.045),vec3(0.16,0.19,0.23),check);
+  }
+  if(id<1.5){
+    float v=lavaVeins(p,n,t);
+    return mix(vec3(0.018,0.025,0.038),vec3(0.19,0.035,0.012),v*0.82);
+  }
+  if(id<2.5)return vec3(0.035,0.38,0.52);
+  if(id<3.5)return vec3(0.52,0.12,0.055);
+  return vec3(0.30,0.24,0.58);
+}
+vec3 emissionColor(vec3 p,vec3 n,float id,float t){
+  if(id<0.5||id>1.5)return vec3(0.0);
+  float v=lavaVeins(p,n,t);
+  float pulse=0.72+0.28*sin(t*3.2+length(p)*5.0);
+  return vec3(1.25,0.12,0.012)*v*pulse;
+}
+vec3 normalAt(vec3 p,float t){
+  vec2 e=vec2(0.001,0.0);
+  return normalize(
+    vec3(1.0,-1.0,-1.0)*mapScene(p+vec3(e.x,-e.x,-e.x),t).x+
+    vec3(-1.0,-1.0,1.0)*mapScene(p+vec3(-e.x,-e.x,e.x),t).x+
+    vec3(-1.0,1.0,-1.0)*mapScene(p+vec3(-e.x,e.x,-e.x),t).x+
+    vec3(1.0,1.0,1.0)*mapScene(p+vec3(e.x,e.x,e.x),t).x
+  );
+}
+vec3 march(vec3 ro,vec3 rd,float t,int maxSteps,float maxDist){
+  float d=0.0;
+  float id=-1.0;
+  for(int i=0;i<112;i++){
+    if(i>=maxSteps)break;
+    vec2 h=mapScene(ro+rd*d,t);
+    if(h.x<0.0015){id=h.y;break;}
+    d+=h.x;
+    if(d>maxDist)break;
+  }
+  return vec3(d,id,id>=0.0?1.0:0.0);
+}
+float softShadow(vec3 ro,vec3 rd,float t){
+  float res=1.0;
+  float d=0.025;
+  for(int i=0;i<30;i++){
+    float h=mapScene(ro+rd*d,t).x;
+    if(h<0.001)return 0.0;
+    res=min(res,12.0*h/d);
+    d+=clamp(h,0.025,0.30);
+    if(d>8.0)break;
+  }
+  return clamp(res,0.0,1.0);
+}
+float ambientOcclusion(vec3 p,vec3 n,float t){
+  float occ=0.0,weight=1.0;
+  for(int i=1;i<=5;i++){
+    float h=0.035*float(i);
+    float d=mapScene(p+n*h,t).x;
+    occ+=(h-d)*weight;
+    weight*=0.72;
+  }
+  return clamp(1.0-2.2*occ,0.52,1.0);
+}
+vec3 skyColor(vec3 rd,float t){
+  float h=clamp(rd.y*0.5+0.5,0.0,1.0);
+  vec3 col=mix(vec3(0.006,0.009,0.025),vec3(0.045,0.075,0.15),pow(h,1.35));
+  float neb=0.5+0.5*sin(rd.x*5.0+sin(rd.z*4.0+t*0.025))*sin(rd.y*7.0-rd.z*3.0);
+  col+=vec3(0.018,0.026,0.065)*neb*pow(h,0.5);
+  vec2 uv=vec2(atan(rd.z,rd.x)/(2.0*PI)+0.5,asin(clamp(rd.y,-1.0,1.0))/PI+0.5);
+  vec2 cell=uv*vec2(220.0,110.0);
+  vec2 id=floor(cell);
+  vec2 gv=fract(cell)-0.5;
+  vec2 jitter=(hash22(id)-0.5)*0.7;
+  float star=1.0-smoothstep(0.012,0.045,length(gv-jitter));
+  star*=step(0.987,hash22(id+7.13).x);
+  col+=vec3(0.55,0.72,1.0)*star*(0.6+0.4*sin(t*1.7+hash22(id+2.4).y*6.0));
+  return col;
+}
+vec3 fogColor(vec3 rd){
+  float h=clamp(rd.y*0.5+0.5,0.0,1.0);
+  return mix(vec3(0.012,0.018,0.035),vec3(0.045,0.065,0.11),h);
+}
+vec3 lightSurface(vec3 p,vec3 rd,vec3 n,float id,float t,float shadow,float ao){
+  vec3 base=baseColor(p,n,id,t);
+  vec3 l=normalize(vec3(-0.45,0.82,0.55));
+  float diff=max(dot(n,l),0.0);
+  vec3 v=-rd;
+  vec3 halfV=normalize(l+v);
+  float spec=pow(max(dot(n,halfV),0.0),54.0);
+  float floorMat=step(0.5,id);
+  vec3 ambient=mix(vec3(0.13,0.18,0.28),vec3(0.10,0.13,0.20),floorMat);
+  vec3 col=base*(ambient+vec3(0.92,0.72,0.52)*diff*shadow)*ao;
+  col+=vec3(0.75,0.83,1.0)*spec*shadow*(0.16+0.30*floorMat);
+  float fres=pow(1.0-max(dot(n,v),0.0),4.0);
+  col+=vec3(0.10,0.40,0.72)*fres*0.42;
+  col+=emissionColor(p,n,id,t);
+  return col;
+}
+vec3 aces(vec3 x){
+  return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0,1.0);
+}
+
+vec3 pathPoint(int i){
+  i=(i%8+8)%8;
+  if(i==0)return vec3(4.2,1.35,0.3);
+  if(i==1)return vec3(3.0,0.12,3.3);
+  if(i==2)return vec3(0.0,-0.22,4.25);
+  if(i==3)return vec3(-3.15,0.72,3.05);
+  if(i==4)return vec3(-4.15,2.45,-0.15);
+  if(i==5)return vec3(-2.75,0.10,-3.25);
+  if(i==6)return vec3(0.15,-0.18,-4.25);
+  return vec3(3.2,0.18,-2.95);
+}
+vec3 cameraPath(float t){
+  float phase=mod(t*0.075,8.0);
+  int i=int(floor(phase));
+  float u=fract(phase),u2=u*u,u3=u2*u;
+  vec3 p0=pathPoint(i-1),p1=pathPoint(i),p2=pathPoint(i+1),p3=pathPoint(i+2);
+  return 0.5*((2.0*p1)+(-p0+p2)*u+(2.0*p0-5.0*p1+4.0*p2-p3)*u2+(-p0+3.0*p1-3.0*p2+p3)*u3);
+}
+
+void main(){
+  float t=iTime;
+  vec2 screen=(vUv*2.0-1.0)*vec2(iResolution.x/iResolution.y,1.0);
+  vec3 ro=cameraPath(t);
+  vec3 target=vec3(0.0,0.03+0.07*sin(t*0.22),0.0);
+  vec3 forward=normalize(target-ro);
+  vec3 right=normalize(cross(forward,vec3(0.0,1.0,0.0)));
+  vec3 up=normalize(cross(right,forward));
+  vec3 rd=normalize(forward*1.48+right*screen.x+up*screen.y);
+
+  vec3 hit=march(ro,rd,t,108,32.0);
+  vec3 col;
+  if(hit.z<0.5){
+    col=skyColor(rd,t);
+  }else{
+    vec3 p=ro+rd*hit.x;
+    vec3 n=normalAt(p,t);
+    vec3 l=normalize(vec3(-0.45,0.82,0.55));
+    float sh=softShadow(p+n*0.012,l,t);
+    float ao=ambientOcclusion(p,n,t);
+    vec3 direct=lightSurface(p,rd,n,hit.y,t,sh,ao);
+    float fres=pow(1.0-max(dot(n,-rd),0.0),5.0);
+    vec3 reflected=reflect(rd,n);
+    vec3 bounce;
+    vec3 second=march(p+n*0.025,reflected,t,58,22.0);
+    if(second.z<0.5){
+      bounce=skyColor(reflected,t);
+    }else{
+      vec3 p2=p+n*0.025+reflected*second.x;
+      vec3 n2=normalAt(p2,t);
+      bounce=lightSurface(p2,reflected,n2,second.y,t,0.82,0.94);
+    }
+    float reflectivity=hit.y<0.5?0.52:0.22;
+    vec3 shaded=mix(direct,bounce,clamp(reflectivity+fres*0.44,0.0,0.86));
+    float fog=1.0-exp(-hit.x*0.026);
+    col=mix(shaded,fogColor(rd),fog);
+    col+=vec3(0.035,0.14,0.26)*fres*(1.0-fog);
+  }
+
+  float vignette=1.0-0.28*dot(screen*0.48,screen*0.48);
+  col*=clamp(vignette,0.68,1.0);
+  col=aces(col*1.18);
+  col=pow(max(col,0.0),vec3(1.0/2.2));
+  gl_FragColor=vec4(col,1.0);
+}`;
+
+const renderer = new THREE.WebGLRenderer({antialias:false, powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x050711, 1);
+document.body.appendChild(renderer.domElement);
+
+const material = new THREE.ShaderMaterial({
+  vertexShader,
+  fragmentShader,
+  uniforms: {
+    iTime: {value:0},
+    iResolution: {value:new THREE.Vector2(window.innerWidth,window.innerHeight)}
+  },
+  depthTest:false,
+  depthWrite:false,
+  toneMapped:false
+});
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-1,1,1,-1,0.1,10);
+camera.position.z=1;
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),material));
+
+function resize(){
+  renderer.setSize(window.innerWidth,window.innerHeight);
+  const size=renderer.getDrawingBufferSize(new THREE.Vector2());
+  material.uniforms.iResolution.value.copy(size);
+}
+window.addEventListener('resize',resize);
+resize();
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(()=>{
+  material.uniforms.iTime.value=clock.getElapsedTime();
+  renderer.render(scene,camera);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Extreme Rube-Goldberg</title>
+<style>
+  html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#101726;font-family:Arial,Helvetica,sans-serif}
+  #app{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%}
+  #stages{position:fixed;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:7px;flex-wrap:wrap;justify-content:center;max-width:96vw;pointer-events:none;z-index:5}
+  .chip{color:#c9d4ea;background:rgba(8,14,28,.72);border:2px solid #3b4a6b;border-radius:999px;padding:7px 11px;font-size:13px;font-weight:700;letter-spacing:.2px;transition:all .25s}
+  .chip b{display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;border-radius:50%;background:#2a3857;color:#fff;margin-right:6px}
+  .chip.done{border-color:#58d38a;color:#dffbea}
+  .chip.done b{background:#268653}
+  .chip.on{border-color:#ffd23f;color:#fff7cf;background:rgba(90,62,0,.82);box-shadow:0 0 18px #ffd23f,0 0 4px #fff}
+  .chip.on b{background:#ff9f1c;color:#201400}
+  #caption{position:fixed;left:50%;bottom:42px;transform:translateX(-50%);color:#fff;background:rgba(5,10,22,.72);border:1px solid rgba(255,255,255,.25);border-radius:12px;padding:9px 16px;font-size:17px;font-weight:800;pointer-events:none;z-index:5;white-space:nowrap}
+  #title{position:fixed;top:62px;left:50%;transform:translateX(-50%);color:#fff;font-size:21px;font-weight:900;letter-spacing:1px;text-shadow:0 2px 10px #000;pointer-events:none;z-index:5}
+  #barWrap{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);width:min(620px,88vw);height:10px;background:rgba(255,255,255,.18);border-radius:99px;overflow:hidden;z-index:5;pointer-events:none}
+  #bar{height:100%;width:0%;background:linear-gradient(90deg,#39d0ff,#7CFC9a,#ffd23f,#ff7b54)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="stages">
+  <div class="chip"><b>1</b>Domino S-Branch</div>
+  <div class="chip"><b>2</b>Bridge Merge</div>
+  <div class="chip"><b>3</b>Funnel Spiral</div>
+  <div class="chip"><b>4</b>Seesaw Launch</div>
+  <div class="chip"><b>5</b>Pendulum Hammer</div>
+  <div class="chip"><b>6</b>Blocks → Bucket</div>
+  <div class="chip"><b>7</b>Flag + Lamp</div>
+</div>
+<div id="title">EXTREME RUBE-GOLDBERG</div>
+<div id="caption">1 — Dominoes</div>
+<div id="barWrap"><div id="bar"></div></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const LOOP=15;
+const app=document.getElementById('app');
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+app.appendChild(renderer.domElement);
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x101726);
+scene.fog=new THREE.Fog(0x101726,28,55);
+const camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,0.1,100);
+camera.position.set(-7,5,8);
+
+scene.add(new THREE.AmbientLight(0xffffff,1.15));
+const sun=new THREE.DirectionalLight(0xffffff,2.6);
+sun.position.set(-6,12,7);
+sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-16; sun.shadow.camera.right=16;
+sun.shadow.camera.top=14; sun.shadow.camera.bottom=-10;
+sun.shadow.camera.far=35;
+scene.add(sun);
+const fill=new THREE.DirectionalLight(0x9ecbff,0.7);
+fill.position.set(8,6,-8); scene.add(fill);
+
+// ---- helpers ----
+const clamp01=v=>Math.max(0,Math.min(1,v));
+const seg=(t,a,b)=>clamp01((t-a)/(b-a));
+const lerp=(a,b,u)=>a+(b-a)*u;
+const smooth=u=>{u=clamp01(u);return u*u*(3-2*u)};
+const easeIn=u=>u*u;
+const easeOut=u=>1-Math.pow(1-u,3);
+const V=(x,y,z)=>new THREE.Vector3(x,y,z);
+function mat(c,o={}){return new THREE.MeshStandardMaterial({color:c,roughness:0.55,metalness:0.08,...o})}
+function box(x,y,z,sx,sy,sz,c,parent=scene){
+  const m=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),mat(c));
+  m.position.set(x,y,z); m.castShadow=true; m.receiveShadow=true; parent.add(m); return m;
+}
+function cyl(x,y,z,r1,r2,h,c,parent=scene,segN=20){
+  const m=new THREE.Mesh(new THREE.CylinderGeometry(r1,r2,h,segN),mat(c));
+  m.position.set(x,y,z); m.castShadow=true; m.receiveShadow=true; parent.add(m); return m;
+}
+function ball(x,y,z,r,c,parent=scene){
+  const m=new THREE.Mesh(new THREE.SphereGeometry(r,28,20),mat(c,{roughness:0.25,metalness:0.25}));
+  m.position.set(x,y,z); m.castShadow=true; parent.add(m); return m;
+}
+
+// ---- ground ----
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(34,18),mat(0x1d2b3d,{roughness:0.95}));
+ground.rotation.x=-Math.PI/2; ground.position.set(1.5,0,0); ground.receiveShadow=true; scene.add(ground);
+const grid=new THREE.GridHelper(34,34,0x335077,0x243a5c);
+grid.position.set(1.5,0.02,0); scene.add(grid);
+// colored stage pads
+box(-4,0.03,0,14,0.06,5.6,0x23405f);
+box(6,0.03,-0.6,4.6,0.06,5.6,0x3b2c55);
+box(10.2,0.03,1.0,5.4,0.06,4.4,0x4a2f2f);
+box(12.4,0.03,0.2,3.2,0.06,3.0,0x274d36);
+
+// ---- dust puffs ----
+const dustEvents=[];
+function puff(t,x,y,z,n=8){dustEvents.push({t,x,y,z,n})}
+
+// ---- dominoes ----
+const dominoes=[];
+const rainbow=[0xff4d6d,0xff9f1c,0xffd23f,0x6ee66e,0x35c4ff,0x7b7bff,0xd66bff];
+function addDomino(x,z,yaw,fallT,color,baseY=0,w=0.72,h=1.12){
+  const g=new THREE.Group();
+  g.position.set(x,baseY,z);
+  g.rotation.order='YXZ'; g.rotation.y=yaw;
+  const m=box(0,h/2,0,w,h,0.18,color,g);
+  // white dots stripe
+  const s=box(0,h*0.78,0.105,w*0.55,0.09,0.02,0xffffff,g); s.castShadow=false;
+  scene.add(g);
+  const d={g,fallT,h,x,z,baseY,yaw};
+  dominoes.push(d);
+  const tipX=x+Math.sin(yaw)*h, tipZ=z+Math.cos(yaw)*h;
+  puff(fallT+0.30,tipX,baseY+0.12,tipZ,7);
+  return d;
+}
+function yawTo(a,b){return Math.atan2(b[0]-a[0],b[1]-a[1])}
+function addPath(pts,startT,step,colors,baseYs){
+  pts.forEach((p,i)=>{
+    const next=pts[Math.min(i+1,pts.length-1)], prev=pts[Math.max(i-1,0)];
+    const yaw=(i<pts.length-1)?yawTo(p,next):yawTo(prev,p);
+    addDomino(p[0],p[1],yaw,startT+i*step,colors[i%colors.length],baseYs?baseYs[i]:0);
+  });
+}
+// pre-branch S-curve (8)
+const pre=[];
+for(let i=0;i<8;i++){const u=i/7;pre.push([-9.5+i*0.78,1.5*Math.sin((u-0.5)*Math.PI)])}
+addPath(pre,0.30,0.22,rainbow);
+// branch arms (6 + 6), red arm / blue arm, converge to bridge
+const armA=[],armB=[];
+for(let i=0;i<6;i++){
+  const u=i/5, cz=1.45-u*1.25, off=0.62+Math.sin(u*Math.PI)*0.55, x=-3.3+i*0.78;
+  armA.push([x,cz-off]); armB.push([x,cz+off]);
+}
+addPath(armA,2.10,0.22,[0xff3344,0xff6b4a,0xff3344,0xff6b4a]);
+addPath(armB,2.10,0.22,[0x2288ff,0x35c4ff,0x2288ff,0x35c4ff]);
+// bridge piece: wide gold domino both arms hit
+const bridgeYaw=yawTo([0.6,0.2],[2.3,0.2]);
+addDomino(1.45,0.2,bridgeYaw,3.45,0xffc400,0,1.65,1.35);
+// ascending post-bridge dominoes on steps (5) up to funnel rim
+const post=[[2.35,0.1],[3.0,-0.45],[3.5,-1.0],[3.85,-1.55],[4.05,-1.95]];
+const postY=[0,0.55,1.25,1.95,2.62];
+post.forEach((p,i)=>{ if(postY[i]>0) box(p[0],postY[i]/2,p[1],1.0,postY[i],1.0,0x6b7c94); });
+addPath(post,3.72,0.22,[0x6ee66e,0xffd23f,0xff9f1c,0xff4d6d,0xd66bff],postY);
+// re-aim last post domino east toward marble
+dominoes[dominoes.length-1].g.rotation.y=yawTo(post[4],[4.6,-2.0]);
+
+// starter ramp + ball that hits first domino
+const ramp=box(-10.7,0.25,-1.65,1.6,0.12,0.6,0x8a97ad); ramp.rotation.z=0.28;
+const starter=ball(-11.1,0.55,-1.65,0.18,0x7CFC9a);
+
+// ---- funnel tower ----
+const F={x:6,z:-2};
+box(4.65,1.35,-2,0.9,2.7,0.9,0x6b7c94); // marble platform pillar (top 2.7)
+box(4.65,2.78,-2,1.0,0.16,1.0,0x8a97ad);
+for(let i=0;i<4;i++){
+  const a=i*Math.PI/2+Math.PI/4;
+  cyl(F.x+Math.cos(a)*1.75,1.5,F.z+Math.sin(a)*1.75,0.09,0.09,3.0,0x9aa9c2);
+}
+const ring=new THREE.Mesh(new THREE.TorusGeometry(1.62,0.07,12,40),mat(0xff9f1c));
+ring.rotation.x=Math.PI/2; ring.position.set(F.x,3.08,F.z); ring.castShadow=true; scene.add(ring);
+const funnel=new THREE.Mesh(
+  new THREE.CylinderGeometry(1.58,0.26,1.55,36,1,true),
+  mat(0xff7b54,{side:THREE.DoubleSide,transparent:true,opacity:0.55,roughness:0.35})
+);
+funnel.position.set(F.x,2.32,F.z); scene.add(funnel);
+cyl(F.x,1.35,F.z,0.24,0.24,0.5,0xff7b54);
+// spiral tube (core TubeGeometry)
+function helix(u){
+  const a=Math.PI+u*Math.PI*6, r=1.5-1.18*u;
+  return V(F.x+Math.cos(a)*r,3.08-1.58*u,F.z+Math.sin(a)*r);
+}
+const helixPts=[]; for(let i=0;i<=90;i++) helixPts.push(helix(i/90));
+const tube=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(helixPts),120,0.075,10),mat(0xffd23f,{roughness:0.3}));
+tube.castShadow=true; scene.add(tube);
+// chute from spout to seesaw
+const chute=box(F.x,1.0,-1.35,0.42,0.08,1.1,0xffd23f); chute.rotation.x=0.35;
+
+const marble=ball(4.5,3.08,-2,0.23,0xff2266);
+
+// ---- seesaw ----
+const seesaw=new THREE.Group(); seesaw.position.set(6,0.55,0); scene.add(seesaw);
+box(0,0,0,0.45,0.14,3.3,0xff9f1c,seesaw);
+box(0,0.12,-1.45,0.6,0.1,0.5,0xff3344,seesaw);
+box(0,0.12, 1.45,0.6,0.1,0.5,0x2288ff,seesaw);
+const pivot=new THREE.Mesh(new THREE.ConeGeometry(0.42,0.55,4),mat(0x8a97ad));
+pivot.position.set(6,0.27,0); pivot.rotation.y=Math.PI/4; pivot.castShadow=true; scene.add(pivot);
+box(6,0.05,0,1.0,0.1,1.0,0x5a6b85);
+const ball2=ball(6,0.5,1.45,0.26,0xff8c1a);
+
+// ---- pendulum hammer ----
+box(9,1.8,0.45,0.18,3.6,0.18,0x9aa9c2);
+box(9,1.8,2.35,0.18,3.6,0.18,0x9aa9c2);
+box(9,3.65,1.4,0.2,0.2,2.1,0x9aa9c2);
+const pend=new THREE.Group(); pend.position.set(9,3.6,1.4); scene.add(pend);
+cyl(0,-1.25,0,0.06,0.06,2.5,0xdddddd,pend);
+box(0,-2.6,0,0.85,0.85,0.85,0xb03a4b,pend);
+box(0,-2.6,0,0.95,0.22,0.95,0xffd23f,pend);
+
+// ---- block stack ----
+const blocks=[];
+function addBlock(x,y,z,c,fallT,fx,fz,frx,frz,special=false){
+  const m=box(x,y,z,0.6,0.5,0.52,c);
+  const b={m,init:V(x,y,z),fallT,dur:0.75,fall:V(fx,0.25,fz),frx,frz,special};
+  blocks.push(b); puff(fallT+0.7,fx,0.15,fz,10); return b;
+}
+addBlock(10.15,0.25,0.85,0x35c4ff,12.85,11.3,0.4, 1.4,0.6);
+addBlock(10.15,0.25,1.40,0x2288ff,11.50,11.5,1.3, 1.2,-0.8);
+addBlock(10.15,0.25,1.95,0x35c4ff,12.85,11.2,2.5,-1.3,0.7);
+addBlock(10.15,0.75,1.12,0x6ee66e,11.45,11.0,0.8, 1.6,1.1);
+addBlock(10.15,0.75,1.68,0x4ac94a, 9.95,11.4,2.1,-1.5,-0.5);
+addBlock(10.15,1.25,1.40,0xffd23f, 9.90,11.1,1.5, 1.8,0.9);
+const specialBlock=addBlock(10.15,1.75,1.40,0xff4d6d,12.90,11.8,0.2, 0.4,0.3,true);
+specialBlock.fall.set(11.8,2.15,0.2); specialBlock.dur=0.8;
+
+// ---- pulley, bucket, flag, lamp ----
+box(11.6,2.15,0.2,0.18,4.3,0.18,0x9aa9c2);
+box(13.0,2.3,0.2,0.16,4.6,0.16,0xd8dee9); // flag mast
+box(12.3,4.35,0.2,1.7,0.16,0.16,0x9aa9c2);
+const pulley=cyl(12.3,4.35,0.2,0.28,0.28,0.12,0xffd23f); pulley.rotation.x=Math.PI/2;
+const bucket=new THREE.Group(); bucket.position.set(11.8,1.9,0.2); scene.add(bucket);
+const bucketBody=cyl(0,0,0,0.34,0.27,0.55,0xff7b54,bucket);
+cyl(0,0.3,0,0.36,0.36,0.07,0xffc9a3,bucket);
+const flagGroup=new THREE.Group(); flagGroup.position.set(13.0,0.9,0.2); scene.add(flagGroup);
+const flag=new THREE.Mesh(new THREE.PlaneGeometry(1.15,0.68,8,1),mat(0xff3344,{side:THREE.DoubleSide}));
+flag.position.set(0.62,0,0); flag.castShadow=true; flagGroup.add(flag);
+const flagStripe=box(0.62,0,0.012,1.15,0.16,0.015,0xffffff,flagGroup); flagStripe.castShadow=false;
+ball(13.0,4.68,0.2,0.1,0xffd23f);
+// lamp on mast top
+const bulbMat=new THREE.MeshStandardMaterial({color:0x555555,emissive:0x000000,roughness:0.3});
+const bulb=new THREE.Mesh(new THREE.SphereGeometry(0.24,24,18),bulbMat);
+bulb.position.set(13.0,4.95,0.2); scene.add(bulb);
+cyl(13.0,4.78,0.2,0.05,0.05,0.18,0x333333);
+const halo=new THREE.Mesh(new THREE.SphereGeometry(0.55,20,14),
+  new THREE.MeshBasicMaterial({color:0xffd977,transparent:true,opacity:0,depthWrite:false}));
+halo.position.copy(bulb.position); scene.add(halo);
+const lampLight=new THREE.PointLight(0xffc95e,0,14,1.8);
+lampLight.position.copy(bulb.position); scene.add(lampLight);
+// ropes (unit cylinders scaled each frame)
+function makeRope(){
+  const m=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,1,8),mat(0xeeeeee));
+  scene.add(m); return m;
+}
+const ropeL=makeRope(), ropeR=makeRope(), ropeT=makeRope();
+function setRope(m,x,z,y0,y1){const len=Math.max(0.05,y1-y0);m.scale.y=len;m.position.set(x,(y0+y1)/2,z);m.rotation.set(0,0,0)}
+function setRopeH(m,x0,x1,y,z){const len=Math.abs(x1-x0);m.scale.y=len;m.position.set((x0+x1)/2,y,z);m.rotation.set(0,0,Math.PI/2)}
+
+// extra impact puffs
+puff(8.35,6,0.7,-1.45,12); puff(8.55,6,0.8,1.45,10);
+puff(9.72,8.8,1.1,1.4,14);  puff(9.95,10.1,1.2,1.4,14);
+puff(13.72,11.8,2.1,0.2,12); puff(14.55,13,4.4,0.2,8);
+
+// build dust points
+let dustCount=0; dustEvents.forEach(e=>dustCount+=e.n);
+const dustPos=new Float32Array(dustCount*3);
+const dustData=[];
+let di=0;
+function rnd(n){const v=Math.sin(n*127.1+311.7)*43758.5453;return v-Math.floor(v)}
+dustEvents.forEach((e,ei)=>{
+  for(let i=0;i<e.n;i++){
+    const k=di++;
+    dustData.push({e,vx:(rnd(k)-0.5)*1.7,vy:0.5+rnd(k+99)*1.1,vz:(rnd(k+55)-0.5)*1.7});
+  }
+});
+const dustGeo=new THREE.BufferGeometry();
+dustGeo.setAttribute('position',new THREE.BufferAttribute(dustPos,3));
+const dust=new THREE.Points(dustGeo,new THREE.PointsMaterial({color:0xd8c9a3,size:0.24,transparent:true,opacity:0.6,depthWrite:false,sizeAttenuation:true}));
+scene.add(dust);
+
+// ---- timeline functions ----
+function bucketYAt(t){
+  let y=1.9;
+  y=lerp(y,1.72,smooth(seg(t,13.65,14.05)));
+  y=lerp(y,0.38,smooth(seg(t,14.05,14.75)));
+  return y;
+}
+function flagYAt(t){
+  let y=0.9;
+  y=lerp(y,1.12,smooth(seg(t,13.65,14.05)));
+  y=lerp(y,3.85,smooth(seg(t,14.05,14.80)));
+  return y;
+}
+const stageT=[0,3.45,4.90,8.20,9.65,9.90,14.00];
+const stageNames=[
+  "1 — Dominoes: S-curve splits into two arms",
+  "2 — Both arms re-merge at the gold bridge",
+  "3 — Marble spirals down the funnel tower",
+  "4 — Seesaw launches the orange ball",
+  "5 — Ball swings the pendulum hammer",
+  "6 — Blocks collapse into the pulley bucket",
+  "7 — FINALE: flag hoisted + lamp lit!"
+];
+const chips=[...document.querySelectorAll('.chip')];
+const caption=document.getElementById('caption');
+const bar=document.getElementById('bar');
+
+const camKeys=[
+  {t:0,   f:V(-7.5,0.8,-0.5), p:V(-7.5,4.6,7.5)},
+  {t:2.5, f:V(-1.5,0.8,0.2),  p:V(-2,4.8,8)},
+  {t:4.2, f:V(3.2,1.6,-1),    p:V(1.5,5,7)},
+  {t:6.5, f:V(6,2.2,-2),      p:V(2.8,4.2,3.5)},
+  {t:8.3, f:V(6,0.8,0),       p:V(6,3.8,7)},
+  {t:9.8, f:V(9.2,1.4,1.4),   p:V(7.5,4,7.5)},
+  {t:11.5,f:V(10.5,1,1.2),    p:V(9.5,4.5,7.5)},
+  {t:13.5,f:V(12,1.8,0.4),    p:V(11,4.5,7)},
+  {t:15,  f:V(12.6,2.8,0.2),  p:V(10.5,4,7)}
+];
+function updateCamera(t){
+  let i=0; while(i<camKeys.length-2 && t>camKeys[i+1].t) i++;
+  const a=camKeys[i], b=camKeys[i+1];
+  const u=smooth(seg(t,a.t,b.t));
+  const f=a.f.clone().lerp(b.f,u), p=a.p.clone().lerp(b.p,u);
+  camera.position.copy(p); camera.lookAt(f);
+}
+
+const clock=new THREE.Clock();
+const tmpV=new THREE.Vector3();
+
+function animate(){
+  requestAnimationFrame(animate);
+  const elapsed=clock.getElapsedTime();
+  const t=elapsed%LOOP;
+
+  // starter ball rolls into first domino
+  {
+    const u=easeIn(seg(t,0,0.3));
+    starter.position.set(lerp(-11.1,-9.85,u),lerp(0.55,0.18,u),-1.6);
+    starter.rotation.z=-u*6;
+  }
+  // dominoes
+  for(const d of dominoes){
+    const u=seg(t,d.fallT,d.fallT+0.34);
+    let ang=easeIn(u)*1.42;
+    if(u>=1){ const b=seg(t,d.fallT+0.34,d.fallT+0.55); ang=1.42-Math.sin(b*Math.PI)*0.045; }
+    d.g.rotation.x=ang;
+  }
+  // marble: rest -> pushed -> helix -> drop to seesaw -> ride seesaw
+  const seeAng=lerp(0.32,-0.32,easeOut(seg(t,8.25,8.5)));
+  seesaw.rotation.x=seeAng;
+  if(t<4.9){
+    marble.position.set(4.5,3.08,-2);
+  }else if(t<8.0){
+    const u=easeIn(seg(t,4.9,8.0))*0.35+seg(t,4.9,8.0)*0.65;
+    marble.position.copy(helix(clamp01(u)));
+    marble.position.y+=0.16;
+  }else if(t<8.35){
+    const u=seg(t,8.0,8.35), from=helix(1); from.y+=0.16;
+    marble.position.set(lerp(from.x,6,u),lerp(from.y,1.15,easeIn(u)),lerp(from.z,-1.45,u));
+  }else{
+    marble.position.set(6,0.55+1.45*Math.sin(seeAng)+0.32,-1.45*Math.cos(seeAng));
+  }
+  marble.rotation.x=elapsed*3; marble.rotation.z=-elapsed*2;
+
+  // ball2: sit on seesaw -> parabola to hammer -> drop & roll
+  const hit=V(8.62,1.05,1.4);
+  if(t<8.5){
+    ball2.position.set(6,0.55-1.45*Math.sin(seeAng)+0.33,1.45*Math.cos(seeAng));
+  }else if(t<9.7){
+    const u=seg(t,8.5,9.7), start=V(6,1.05,1.45);
+    ball2.position.copy(start.lerp(hit,u));
+    ball2.position.y+=Math.sin(u*Math.PI)*1.55;
+  }else{
+    const u=easeOut(seg(t,9.7,10.6));
+    ball2.position.set(lerp(8.62,9.15,u),lerp(1.05,0.26,easeIn(seg(t,9.7,10.1))),lerp(1.4,1.85,u));
+  }
+  ball2.rotation.z=-elapsed*4;
+
+  // pendulum hammer (struck at 9.7, decaying swings knock layers)
+  let pAng=0;
+  if(t>9.7){ const dt=t-9.7; pAng=1.05*Math.sin(dt*3.9)*Math.exp(-dt*0.38); }
+  pend.rotation.z=pAng;
+
+  // blocks
+  const bY=bucketYAt(t);
+  for(const b of blocks){
+    const u=seg(t,b.fallT,b.fallT+b.dur), e=easeIn(u);
+    b.m.position.copy(b.init).lerp(b.fall,e);
+    b.m.position.y+=Math.sin(u*Math.PI)*(b.special?1.1:0.35);
+    b.m.rotation.x=b.frx*e; b.m.rotation.z=b.frz*e;
+    if(b.special && u>=1){
+      // rides down inside bucket
+      b.m.position.set(11.8,bY+0.28,0.2);
+      b.m.rotation.set(0.35,0.4,0.25);
+    }
+  }
+  // bucket: tips when block lands, then drops in finale
+  bucket.position.y=bY;
+  const tip=seg(t,13.65,14.05);
+  bucket.rotation.z=Math.sin(tip*Math.PI)*0.35*(1-seg(t,14.05,14.4)) + (t>13.65?Math.sin(elapsed*7)*0.04*(1-seg(t,14.2,14.8)):0);
+  // flag hoist (last second) + wave
+  const fY=flagYAt(t);
+  flagGroup.position.y=fY;
+  flag.rotation.y=Math.sin(elapsed*6)*0.22*seg(t,14.1,14.6);
+  flagStripe.rotation.y=flag.rotation.y;
+  // ropes + pulley spin linked to bucket/flag
+  setRope(ropeL,11.8,0.2,bY+0.35,4.35);
+  setRope(ropeR,13.0,0.2,fY+0.25,4.35);
+  setRopeH(ropeT,11.8,13.0,4.38,0.2);
+  pulley.rotation.y=(1.9-bY)*3.5;
+  // lamp lights in last second as flag reaches top
+  const on=smooth(seg(t,14.40,14.65));
+  bulbMat.emissive.setRGB(1.0*on,0.72*on,0.18*on);
+  bulbMat.color.setRGB(0.33+0.67*on,0.33+0.55*on,0.33);
+  lampLight.intensity=on*90;
+  halo.material.opacity=on*0.38;
+  const hs=1+on*0.5+Math.sin(elapsed*8)*0.04*on; halo.scale.set(hs,hs,hs);
+
+  // dust
+  for(let i=0;i<dustData.length;i++){
+    const d=dustData[i], age=t-d.e.t;
+    if(age>0 && age<0.7){
+      dustPos[i*3]=d.e.x+d.vx*age;
+      dustPos[i*3+1]=d.e.y+d.vy*age-1.1*age*age;
+      dustPos[i*3+2]=d.e.z+d.vz*age;
+    }else{ dustPos[i*3]=0; dustPos[i*3+1]=-20; dustPos[i*3+2]=0; }
+  }
+  dustGeo.attributes.position.needsUpdate=true;
+
+  // stage labels + caption + progress
+  let cur=0; stageT.forEach((s,i)=>{ if(t>=s) cur=i; });
+  chips.forEach((c,i)=>{
+    c.classList.toggle('on',i===cur);
+    c.classList.toggle('done',i<cur);
+  });
+  caption.textContent=stageNames[cur];
+  bar.style.width=(t/LOOP*100)+'%';
+
+  updateCamera(t);
+  renderer.render(scene,camera);
+}
+animate();
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>

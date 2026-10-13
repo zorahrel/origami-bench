@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extreme Rube Goldberg</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #050508;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+        }
+        .stage {
+            font-size: 14px;
+            font-weight: 600;
+            opacity: 0.3;
+            transition: opacity 0.3s, transform 0.3s, color 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .stage.active {
+            opacity: 1;
+            transform: translateX(10px);
+            color: #00ffcc;
+        }
+        .stage.done {
+            opacity: 0.6;
+            color: #ffffff;
+        }
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #555;
+            transition: background 0.3s, box-shadow 0.3s;
+        }
+        .stage.active .dot {
+            background: #00ffcc;
+            box-shadow: 0 0 10px #00ffcc;
+        }
+        .stage.done .dot {
+            background: #ffffff;
+        }
+        #title {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            color: rgba(255,255,255,0.4);
+            font-size: 12px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="hud">
+        <div id="s1" class="stage"><div class="dot"></div>1. S-Curve Dominoes & Branch</div>
+        <div id="s2" class="stage"><div class="dot"></div>2. Bridge & Funnel Tower</div>
+        <div id="s3" class="stage"><div class="dot"></div>3. Seesaw Launcher</div>
+        <div id="s4" class="stage"><div class="dot"></div>4. Pendulum Hammer</div>
+        <div id="s5" class="stage"><div class="dot"></div>5. Block Stack Smash</div>
+        <div id="s6" class="stage"><div class="dot"></div>6. Pulley Bucket Hoist</div>
+        <div id="s7" class="stage"><div class="dot"></div>7. Finale: Flag & Lamp</div>
+    </div>
+    <div id="title">Extreme Chain Reaction Machine</div>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050508, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        document.body.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0x202530, 1.5);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xfff5e6, 2.5);
+        dirLight.position.set(20, 40, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 100;
+        const d = 30;
+        dirLight.shadow.camera.left = -d;
+        dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d;
+        dirLight.shadow.camera.bottom = -d;
+        dirLight.shadow.bias = -0.0005;
+        scene.add(dirLight);
+
+        const blueLight = new THREE.PointLight(0x00aaff, 3, 50);
+        blueLight.position.set(-20, 15, -10);
+        scene.add(blueLight);
+
+        // Finale Lamp Light
+        const finaleLampLight = new THREE.PointLight(0xffaa00, 0, 15);
+        finaleLampLight.position.set(10, 8, -12);
+        scene.add(finaleLampLight);
+
+        // --- ENVIRONMENT BASE ---
+        const floorGeo = new THREE.PlaneGeometry(150, 150);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x0a0a12, roughness: 0.8, metalness: 0.2 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.y = -0.1;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // Grid floor pattern
+        const grid = new THREE.GridHelper(100, 50, 0x1f2430, 0x111520);
+        grid.position.y = 0;
+        scene.add(grid);
+
+        // --- MATERIALS ---
+        const materials = {
+            dominoMain: new THREE.MeshStandardMaterial({ color: 0xff3366, roughness: 0.3, metalness: 0.1 }),
+            dominoBranch: new THREE.MeshStandardMaterial({ color: 0xffaa00, roughness: 0.3, metalness: 0.1 }),
+            bridge: new THREE.MeshStandardMaterial({ color: 0x444857, roughness: 0.5, metalness: 0.5 }),
+            marble1: new THREE.MeshStandardMaterial({ color: 0x00ffcc, roughness: 0.1, metalness: 0.8, emissive: 0x004433 }),
+            marble2: new THREE.MeshStandardMaterial({ color: 0xff0066, roughness: 0.1, metalness: 0.8, emissive: 0x440022 }),
+            funnel: new THREE.MeshStandardMaterial({ color: 0x8899a6, roughness: 0.2, metalness: 0.8, wireframe: false, transparent: true, opacity: 0.85 }),
+            seesaw: new THREE.MeshStandardMaterial({ color: 0xaa66ff, roughness: 0.4, metalness: 0.3 }),
+            hammer: new THREE.MeshStandardMaterial({ color: 0x33ff66, roughness: 0.3, metalness: 0.6 }),
+            block: new THREE.MeshStandardMaterial({ color: 0x3388ff, roughness: 0.4 }),
+            bucket: new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.3, metalness: 0.8 }),
+            flag: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, side: THREE.DoubleSide }),
+            pole: new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.9, roughness: 0.1 })
+        };
+
+        // --- PARTICLE / DUST SYSTEM ---
+        const particles = [];
+        const particleGeo = new THREE.SphereGeometry(0.08, 4, 4);
+        const particleMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7 });
+
+        function spawnDust(pos, count = 5, color = 0xffffff) {
+            for (let i = 0; i < count; i++) {
+                const p = new THREE.Mesh(particleGeo, particleMat.clone());
+                p.material.color.setHex(color);
+                p.position.copy(pos);
+                p.userData = {
+                    vel: new THREE.Vector3(
+                        (Math.random() - 0.5) * 1.5,
+                        Math.random() * 1.5 + 0.5,
+                        (Math.random() - 0.5) * 1.5
+                    ),
+                    life: 1.0
+                };
+                scene.add(p);
+                particles.push(p);
+            }
+        }
+
+        function updateParticles(dt) {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.position.addScaledVector(p.userData.vel, dt);
+                p.userData.vel.y -= 4.0 * dt; // gravity
+                p.userData.life -= dt * 2.0;
+                p.material.opacity = Math.max(0, p.userData.life);
+                p.scale.multiplyScalar(0.96);
+                if (p.userData.life <= 0) {
+                    scene.remove(p);
+                    p.geometry.dispose();
+                    p.material.dispose();
+                    particles.splice(i, 1);
+                }
+            }
+        }
+
+        // --- BUILD MACHINE COMPONENTS ---
+
+        // 1. S-CURVE DOMINOES & BRANCH
+        const dominoGeo = new THREE.BoxGeometry(0.3, 1.2, 0.8);
+        const dominoes = [];
+        
+        // Generate S-curve path points
+        const curvePoints = [];
+        for (let i = 0; i <= 25; i++) {
+            const t = i / 25;
+            const x = -15 + t * 25;
+            const z = Math.sin(t * Math.PI * 1.5) * 6;
+            curvePoints.push(new THREE.Vector3(x, 0, z));
+        }
+
+        // Main line & Branch setup
+        // We will create 22 dominoes for main, and at index 12, branch off an arm.
+        const totalDominoes = 24;
+        for (let i = 0; i < totalDominoes; i++) {
+            const isBranchArm = i >= 12 && i < 18;
+            const mat = isBranchArm ? materials.dominoBranch : materials.dominoMain;
+            const mesh = new THREE.Mesh(dominoGeo, mat);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+
+            let pos, rotY;
+            if (i < 12) {
+                // Main start
+                const t = i / 22;
+                pos = new THREE.Vector3(-14 + t * 14, 0.6, Math.sin(t * Math.PI) * 5);
+                rotY = -t * Math.PI * 0.8;
+            } else if (i >= 12 && i < 18) {
+                // Branch Arm A (diverges left)
+                const idx = i - 12;
+                const t = idx / 6;
+                pos = new THREE.Vector3(0 + t * 6, 0.6, 5 + t * 3);
+                rotY = -Math.PI * 0.4 - t * 0.5;
+            } else if (i >= 18) {
+                // Main re-merge / final stretch leading to bridge
+                const idx = i - 18;
+                const t = idx / 6;
+                pos = new THREE.Vector3(6 + t * 5, 0.6, -1 - t * 3);
+                rotY = -Math.PI * 0.2;
+            }
+
+            dominoes.push({
+                mesh: mesh,
+                pos: pos,
+                rotY: rotY,
+                toppling: false,
+                toppleProgress: 0,
+                angle: 0,
+                originalY: pos.y
+            });
+            mesh.position.copy(pos);
+            mesh.rotation.y = rotY;
+        }
+
+        // Branch B (Alternative path starting at domino 12)
+        const branchB_dominoes = [];
+        for (let i = 0; i < 6; i++) {
+            const mesh = new THREE.Mesh(dominoGeo, materials.dominoMain);
+            mesh.castShadow = true;
+            scene.add(mesh);
+            const t = i / 6;
+            const pos = new THREE.Vector3(0 + t * 6, 0.6, 5 - t * 5);
+            const rotY = -Math.PI * 0.5 + t * 0.6;
+            branchB_dominoes.push({
+                mesh: mesh,
+                pos: pos,
+                rotY: rotY,
+                toppling: false,
+                toppleProgress: 0,
+                angle: 0,
+                originalY: pos.y
+            });
+            mesh.position.copy(pos);
+            mesh.rotation.y = rotY;
+        }
+
+        // 2. BRIDGE & FUNNEL TOWER
+        const bridgeGeo = new THREE.BoxGeometry(8, 0.4, 2);
+        const bridgeMesh = new THREE.Mesh(bridgeGeo, materials.bridge);
+        bridgeMesh.position.set(12, 1.5, -5);
+        bridgeMesh.castShadow = true;
+        bridgeMesh.receiveShadow = true;
+        scene.add(bridgeMesh);
+
+        // Funnel Tower
+        const towerGroup = new THREE.Group();
+        towerGroup.position.set(16, 0, -7);
+        scene.add(towerGroup);
+
+        const funnelGeo = new THREE.ConeGeometry(3, 3, 16, 1, true);
+        const funnelMesh = new THREE.Mesh(funnelGeo, materials.funnel);
+        funnelMesh.position.y = 6;
+        funnelMesh.rotation.x = Math.PI; // upside down funnel
+        funnelMesh.castShadow = true;
+        towerGroup.add(funnelMesh);
+
+        // Support pillars for funnel
+        for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 2) {
+            const pillarGeo = new THREE.CylinderGeometry(0.1, 0.1, 6);
+            const pillar = new THREE.Mesh(pillarGeo, materials.bridge);
+            pillar.position.set(Math.cos(angle) * 2, 3, Math.sin(angle) * 2);
+            pillar.castShadow = true;
+            towerGroup.add(pillar);
+        }
+
+        // Marble 1 (Starts at top of funnel)
+        const marbleGeo = new THREE.SphereGeometry(0.4, 32, 32);
+        const marble1 = new THREE.Mesh(marbleGeo, materials.marble1);
+        marble1.castShadow = true;
+        towerGroup.add(marble1);
+
+        // 3. SEESAW LAUNCHER
+        const seesawGroup = new THREE.Group();
+        seesawGroup.position.set(16, 0, -13);
+        scene.add(seesawGroup);
+
+        const fulcrumGeo = new THREE.ConeGeometry(0.8, 1.2, 4);
+        const fulcrum = new THREE.Mesh(fulcrumGeo, materials.bridge);
+        fulcrum.position.y = 0.6;
+        fulcrum.rotation.y = Math.PI / 4;
+        fulcrum.castShadow = true;
+        seesawGroup.add(fulcrum);
+
+        const plankGeo = new THREE.BoxGeometry(1.2, 0.15, 5);
+        const plank = new THREE.Mesh(plankGeo, materials.seesaw);
+        plank.position.y = 1.2;
+        plank.castShadow = true;
+        seesawGroup.add(plank);
+
+        // Marble 2 (Projectile on seesaw end)
+        const marble2 = new THREE.Mesh(marbleGeo, materials.marble2);
+        marble2.position.set(0, 1.5, -2);
+        marble2.castShadow = true;
+        seesawGroup.add(marble2);
+
+        // 4. PENDULUM HAMMER
+        const pendulumPivot = new THREE.Group();
+        pendulumPivot.position.set(16, 6, -18);
+        scene.add(pendulumPivot);
+
+        const rodGeo = new THREE.CylinderGeometry(0.08, 0.08, 5);
+        const rod = new THREE.Mesh(rodGeo, materials.pole);
+        rod.position.y = -2.5;
+        rod.castShadow = true;
+        pendulumPivot.add(rod);
+
+        const hammerGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+        const hammer = new THREE.Mesh(hammerGeo, materials.hammer);
+        hammer.position.y = -5;
+        hammer.castShadow = true;
+        pendulumPivot.add(hammer);
+
+        // 5. BLOCK STACK
+        const blockStackGroup = new THREE.Group();
+        blockStackGroup.position.set(16, 0, -22);
+        scene.add(blockStackGroup);
+
+        const blockGeo = new THREE.BoxGeometry(1.5, 0.8, 1.5);
+        const blocks = [];
+        for (let i = 0; i < 4; i++) {
+            const b = new THREE.Mesh(blockGeo, materials.block);
+            b.position.y = 0.4 + i * 0.8;
+            b.castShadow = true;
+            b.receiveShadow = true;
+            blockStackGroup.add(b);
+            blocks.push({ mesh: b, offset: i, velocity: new THREE.Vector3(), rotVel: new THREE.Vector3(), fallen: false });
+        }
+
+        // 6. PULLEY BUCKET HOIST
+        const pulleyGroup = new THREE.Group();
+        pulleyGroup.position.set(10, 0, -22);
+        scene.add(pulleyGroup);
+
+        // Gantry structure
+        const gantryGeo = new THREE.CylinderGeometry(0.15, 0.15, 10);
+        const g1 = new THREE.Mesh(gantryGeo, materials.pole);
+        g1.position.set(-2, 5, 0); g1.castShadow = true; pulleyGroup.add(g1);
+        const g2 = new THREE.Mesh(gantryGeo, materials.pole);
+        g2.position.set(2, 5, 0); g2.castShadow = true; pulleyGroup.add(g2);
+        const g3 = new THREE.BoxGeometry(4.2, 0.3, 0.3);
+        const g3Mesh = new THREE.Mesh(g3, materials.pole);
+        g3Mesh.position.set(0, 10, 0); g3Mesh.castShadow = true; pulleyGroup.add(g3Mesh);
+
+        // Bucket (Weight lifted)
+        const bucketGeo = new THREE.CylinderGeometry(0.8, 0.6, 1.5, 12, 1, true);
+        const bucket = new THREE.Mesh(bucketGeo, materials.bucket);
+        bucket.position.set(-1.5, 1.0, 0);
+        bucket.castShadow = true;
+        pulleyGroup.add(bucket);
+
+        // Counterweight
+        const counterWeightGeo = new THREE.BoxGeometry(1, 1.5, 1);
+        const counterWeight = new THREE.Mesh(counterWeightGeo, materials.hammer);
+        counterWeight.position.set(1.5, 8.5, 0);
+        counterWeight.castShadow = true;
+        pulleyGroup.add(counterWeight);
+
+        // 7. FINALE: FLAG & LAMP
+        const finaleGroup = new THREE.Group();
+        finaleGroup.position.set(10, 0, -26);
+        scene.add(finaleGroup);
+
+        const flagPoleGeo = new THREE.CylinderGeometry(0.1, 0.1, 8);
+        const flagPole = new THREE.Mesh(flagPoleGeo, materials.pole);
+        flagPole.position.set(0, 4, 0);
+        flagPole.castShadow = true;
+        finaleGroup.add(flagPole);
+
+        const flagGeo = new THREE.PlaneGeometry(2, 1.2, 8, 4);
+        const flagMesh = new THREE.Mesh(flagGeo, materials.flag);
+        flagMesh.position.set(1, 6.5, 0);
+        flagMesh.castShadow = true;
+        finaleGroup.add(flagMesh);
+
+        // Lamp
+        const lampBaseGeo = new THREE.CylinderGeometry(0.6, 0.8, 0.4);
+        const lampBase = new THREE.Mesh(lampBaseGeo, materials.bridge);
+        lampBase.position.set(0, 0.2, -3);
+        lampBase.castShadow = true;
+        finaleGroup.add(lampBase);
+
+        const bulbGeo = new THREE.SphereGeometry(0.5, 16, 16);
+        const bulbMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, emissive: 0xff5500, emissiveIntensity: 0.2, roughness: 0.2 });
+        const bulb = new THREE.Mesh(bulbGeo, bulbMat);
+        bulb.position.set(0, 1.5, -3);
+        finaleGroup.add(bulb);
+
+
+        // --- SIMULATION STATE & TIMELINE ---
+        let simTime = 0;
+        const loopDuration = 15.0; // ~15 seconds loop
+
+        // Stage activation flags
+        const stages = [
+            { id: 's1', start: 0.0, active: false, done: false },
+            { id: 's2', start: 3.5, active: false, done: false },
+            { id: 's3', start: 6.0, active: false, done: false },
+            { id: 's4', start: 8.0, active: false, done: false },
+            { id: 's5', start: 10.0, active: false, done: false },
+            { id: 's6', start: 12.0, active: false, done: false },
+            { id: 's7', start: 13.8, active: false, done: false } // within last second
+        ];
+
+        function resetSimulation() {
+            simTime = 0;
+            stages.forEach(s => { s.active = false; s.done = false; document.getElementById(s.id).className = 'stage'; });
+            
+            // Reset dominoes
+            dominoes.forEach(d => {
+                d.toppling = false;
+                d.toppleProgress = 0;
+                d.angle = 0;
+                d.mesh.position.copy(d.pos);
+                d.mesh.rotation.y = d.rotY;
+                d.mesh.rotation.x = 0;
+                d.mesh.rotation.z = 0;
+            });
+            branchB_dominoes.forEach(d => {
+                d.toppling = false;
+                d.toppleProgress = 0;
+                d.angle = 0;
+                d.mesh.position.copy(d.pos);
+                d.mesh.rotation.y = d.rotY;
+                d.mesh.rotation.x = 0;
+                d.mesh.rotation.z = 0;
+            });
+
+            // Reset Marble 1
+            marble1.position.set(0, 5.8, 0);
+            marble1.userData.vel = new THREE.Vector3(0,0,0);
+            marble1.userData.state = 'waiting';
+
+            // Reset seesaw
+            plank.rotation.z = 0;
+            marble2.position.set(0, 1.5, -2);
+            marble2.userData.vel = new THREE.Vector3(0,0,0);
+            marble2.userData.state = 'waiting';
+
+            // Reset pendulum
+            pendulumPivot.rotation.z = 0;
+            pendulumPivot.userData.vel = 0;
+            pendulumPivot.userData.triggered = false;
+
+            // Reset blocks
+            blocks.forEach((b, idx) => {
+                b.mesh.position.set(0, 0.4 + idx * 0.8, 0);
+                b.mesh.rotation.set(0,0,0);
+                b.fallen = false;
+                b.velocity.set(0,0,0);
+                b.rotVel.set(0,0,0);
+            });
+
+            // Reset bucket & pulley
+            bucket.position.set(-1.5, 1.0, 0);
+            counterWeight.position.set(1.5, 8.5, 0);
+            bucket.userData.triggered = false;
+
+            // Reset flag & lamp
+            flagMesh.position.y = 6.5;
+            flagMesh.rotation.y = 0;
+            bulbMat.emissiveIntensity = 0.2;
+            finaleLampLight.intensity = 0;
+        }
+
+        // Initialize state
+        resetSimulation();
+
+        // --- CAMERA CONTROLLER ---
+        const camTarget = new THREE.Vector3(0, 2, 0);
+        const camPos = new THREE.Vector3(0, 15, 30);
+
+        function updateCamera(dt) {
+            // Dynamic tracking based on simulation time / active stage
+            let targetPos = new THREE.Vector3(0, 15, 30);
+            let lookAtPos = new THREE.Vector3(0, 2, 0);
+
+            if (simTime < 3.5) {
+                // Stage 1: S-curve & Branch
+                targetPos.set(-8, 6, 12);
+                lookAtPos.set(-4, 1, 0);
+            } else if (simTime < 6.0) {
+                // Stage 2: Bridge & Funnel Tower
+                targetPos.set(16, 8, 2);
+                lookAtPos.set(15, 4, -6);
+            } else if (simTime < 8.0) {
+                // Stage 3: Seesaw Launcher
+                targetPos.set(12, 6, -8);
+                lookAtPos.set(16, 2, -13);
+            } else if (simTime < 10.0) {
+                // Stage 4: Pendulum Hammer
+                targetPos.set(22, 8, -14);
+                lookAtPos.set(16, 4, -18);
+            } else if (simTime < 12.0) {
+                // Stage 5: Block Stack
+                targetPos.set(10, 6, -17);
+                lookAtPos.set(16, 2, -22);
+            } else if (simTime < 13.8) {
+                // Stage 6: Pulley Bucket Hoist
+                targetPos.set(5, 8, -17);
+                lookAtPos.set(8, 5, -22);
+            } else {
+                // Stage 7: Finale (Flag & Lamp)
+                targetPos.set(6, 4, -20);
+                lookAtPos.set(10, 4, -26);
+            }
+
+            camPos.lerp(targetPos, dt * 3.0);
+            camTarget.lerp(lookAtPos, dt * 3.0);
+            camera.position.copy(camPos);
+            camera.lookAt(camTarget);
+        }
+
+        // --- HUD UPDATER ---
+        function updateHUD() {
+            stages.forEach((s, idx) => {
+                const el = document.getElementById(s.id);
+                if (simTime >= s.start) {
+                    if (!s.active && !s.done) {
+                        s.active = true;
+                        el.className = 'stage active';
+                        // mark previous as done
+                        if (idx > 0) {
+                            stages[idx-1].active = false;
+                            stages[idx-1].done = true;
+                            document.getElementById(stages[idx-1].id).className = 'stage done';
+                        }
+                    }
+                }
+            });
+        }
+
+        // --- MAIN ANIMATION & PHYSICS LOOP ---
+        let lastTime = performance.now();
+
+        function animate(now) {
+            requestAnimationFrame(animate);
+
+            const dt = Math.min((now - lastTime) / 1000, 0.1);
+            lastTime = now;
+            simTime += dt;
+
+            if (simTime >= loopDuration) {
+                resetSimulation();
+            }
+
+            updateHUD();
+            updateCamera(dt);
+            updateParticles(dt);
+
+            // --- STAGE 1: DOMINO CHAIN & BRANCH ---
+            // Trigger first domino at t = 0.2
+            if (simTime >= 0.2) {
+                dominoes[0].toppling = true;
+            }
+
+            // Propagate dominoes
+            for (let i = 0; i < dominoes.length; i++) {
+                const d = dominoes[i];
+                if (d.toppling && d.angle < Math.PI / 2) {
+                    d.angle += dt * 8.0;
+                    if (d.angle > Math.PI / 2) d.angle = Math.PI / 2;
+                    
+                    // Rotate around local Z axis for toppling
+                    d.mesh.rotation.x = Math.sin(d.rotY) * d.angle;
+                    d.mesh.rotation.z = -Math.cos(d.rotY) * d.angle;
+                    d.mesh.position.y = d.originalY - Math.sin(d.angle) * 0.3;
+
+                    // Trigger next dominoes in sequence
+                    if (d.angle > Math.PI / 4) {
+                        if (i + 1 < dominoes.length && i !== 11) {
+                            dominoes[i + 1].toppling = true;
+                        }
+                        // At domino 12, trigger branch arm and branch B simultaneously!
+                        if (i === 11) {
+                            dominoes[12].toppling = true; // Arm A
+                            branchB_dominoes[0].toppling = true; // Arm B
+                            spawnDust(dominoes[12].mesh.position, 4, 0xffaa00);
+                        }
+                    }
+                }
+            }
+
+            // Propagate Branch B
+            for (let i = 0; i < branchB_dominoes.length; i++) {
+                const d = branchB_dominoes[i];
+                if (d.toppling && d.angle < Math.PI / 2) {
+                    d.angle += dt * 8.0;
+                    if (d.angle > Math.PI / 2) d.angle = Math.PI / 2;
+                    d.mesh.rotation.x = Math.sin(d.rotY) * d.angle;
+                    d.mesh.rotation.z = -Math.cos(d.rotY) * d.angle;
+                    d.mesh.position.y = d.originalY - Math.sin(d.angle) * 0.3;
+
+                    if (d.angle > Math.PI / 4 && i + 1 < branchB_dominoes.length) {
+                        branchB_dominoes[i + 1].toppling = true;
+                    }
+                }
+            }
+
+            // --- STAGE 2: BRIDGE & FUNNEL TOWER ---
+            // When final dominoes hit bridge area (~t = 3.5), release marble in funnel
+            const lastMainDomino = dominoes[dominoes.length - 1];
+            if (lastMainDomino.toppling && marble1.userData.state === 'waiting') {
+                if (lastMainDomino.angle > Math.PI / 3) {
+                    marble1.userData.state = 'spiraling';
+                    spawnDust(bridgeMesh.position, 8, 0xff3366);
+                }
+            }
+
+            if (marble1.userData.state === 'spiraling') {
+                if (!marble1.userData.spiralAngle) marble1.userData.spiralAngle = 0;
+                if (!marble1.userData.spiralHeight) marble1.userData.spiralHeight = 5.8;
+
+                marble1.userData.spiralAngle += dt * 6.0;
+                marble1.userData.spiralHeight -= dt * 2.5;
+
+                const radius = Math.max(0.2, (marble1.userData.spiralHeight / 6) * 2.2);
+                marble1.position.x = Math.cos(marble1.userData.spiralAngle) * radius;
+                marble1.position.z = Math.sin(marble1.userData.spiralAngle) * radius;
+                marble1.position.y = marble1.userData.spiralHeight;
+
+                if (marble1.userData.spiralHeight <= 1.5) {
+                    marble1.userData.state = 'falling';
+                    marble1.userData.vel.set(0, -2, 4);
+                }
+            } else if (marble1.userData.state === 'falling') {
+                marble1.position.addScaledVector(marble1.userData.vel, dt);
+                marble1.userData.vel.y -= 9.8 * dt;
+
+                // Hit seesaw plank at (16, 1.2, -15) relative to tower group
+                // Tower is at (16,0,-7), marble local pos vs seesaw at (16,0,-13) -> delta z is -6
+                const globalMarblePos = marble1.localToWorld(new THREE.Vector3(0,0,0));
+                // Seesaw paddle end is around (16, 1.3, -15)
+                if (globalMarblePos.z <= -14.5 && globalMarblePos.y <= 1.5) {
+                    marble1.userData.state = 'done';
+                    spawnDust(globalMarblePos, 10, 0x00ffcc);
+
+                    // --- STAGE 3: SEESAW LAUNCHER ---
+                    plank.userData.triggered = true;
+                }
+            }
+
+            // Seesaw rotation & projectile launch
+            if (plank.userData.triggered && plank.rotation.z > -0.4) {
+                plank.rotation.z -= dt * 6.0;
+                // Launch marble 2
+                marble2.position.y += dt * 6.0;
+                marble2.position.z -= dt * 4.0;
+
+                if (plank.rotation.z <= -0.4 && !marble2.userData.launched) {
+                    marble2.userData.launched = true;
+                    marble2.userData.vel.set(0, 4, -8);
+                    spawnDust(marble2.position, 6, 0xff0066);
+                }
+            }
+
+            if (marble2.userData.launched && marble2.userData.vel) {
+                marble2.position.addScaledVector(marble2.userData.vel, dt);
+                marble2.userData.vel.y -= 12.0 * dt;
+
+                // Check hit with pendulum hammer at roughly (16, 6, -18)
+                if (marble2.position.y <= 5.0 && marble2.position.z <= -17.5 && !pendulumPivot.userData.triggered) {
+                    pendulumPivot.userData.triggered = true;
+                    marble2.userData.vel.set(0,0,0);
+                    spawnDust(marble2.position, 10, 0xff0066);
+
+                    // --- STAGE 4: PENDULUM HAMMER ---
+                }
+            }
+
+            // Pendulum swing animation
+            if (pendulumPivot.userData.triggered && pendulumPivot.rotation.z < Math.PI * 0.75) {
+                pendulumPivot.userData.vel += dt * 8.0;
+                pendulumPivot.rotation.z += pendulumPivot.userData.vel * dt;
+
+                // When hammer swings down and hits block stack at ~z = -22
+                if (pendulumPivot.rotation.z >= Math.PI * 0.4 && !blocks[0].fallen) {
+                    blocks.forEach((b, idx) => {
+                        b.fallen = true;
+                        b.velocity.set((Math.random() - 0.5) * 3, Math.random() * 4 + 2, -4 - idx * 2);
+                        b.rotVel.set(Math.random() * 10, Math.random() * 10, Math.random() * 10);
+                    });
+                    spawnDust(blockStackGroup.position, 15, 0x3388ff);
+
+                    // --- STAGE 5: BLOCK STACK SMASH & STAGE 6: PULLEY ---
+                    bucket.userData.triggered = true;
+                }
+            }
+
+            // Animate fallen blocks
+            blocks.forEach(b => {
+                if (b.fallen) {
+                    b.mesh.position.addScaledVector(b.velocity, dt);
+                    b.velocity.y -= 15.0 * dt;
+                    b.mesh.rotation.x += b.rotVel.x * dt;
+                    b.mesh.rotation.y += b.rotVel.y * dt;
+                    b.mesh.rotation.z += b.rotVel.z * dt;
+
+                    // Floor collision
+                    if (b.mesh.position.y < 0.4) {
+                        b.mesh.position.y = 0.4;
+                        b.velocity.multiplyScalar(0.2);
+                        b.rotVel.multiplyScalar(0.2);
+                    }
+                }
+            });
+
+            // --- STAGE 6: PULLEY BUCKET HOIST ---
+            if (bucket.userData.triggered) {
+                if (bucket.position.y < 7.5) {
+                    bucket.position.y += dt * 5.0;
+                    counterWeight.position.y -= dt * 5.0;
+                } else {
+                    // --- STAGE 7: FINALE (FLAG & LAMP) ---
+                    // Raise Flag
+                    if (flagMesh.position.y < 9.5) {
+                        flagMesh.position.y += dt * 3.0;
+                        flagMesh.rotation.y = Math.sin(simTime * 15) * 0.3; // wave effect
+                    }
+                    // Light Lamp
+                    if (bulbMat.emissiveIntensity < 2.0) {
+                        bulbMat.emissiveIntensity += dt * 3.0;
+                        finaleLampLight.intensity += dt * 5.0;
+                    }
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        requestAnimationFrame(animate);
+
+        // --- WINDOW RESIZE ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+    </script>
+</body>
+</html>

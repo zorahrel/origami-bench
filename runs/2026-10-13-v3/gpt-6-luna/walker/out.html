@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gauntlet</title>
+<style>
+*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#080e19;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}canvas{display:block;width:100%;height:100%}#hud{position:fixed;top:24px;left:28px;color:#edf7ff;pointer-events:none;text-shadow:0 2px 12px #000}#eyebrow{font-size:10px;letter-spacing:.28em;color:#69f5ed;font-weight:800}#phase{margin-top:6px;font-size:clamp(18px,2.3vw,28px);font-weight:850;letter-spacing:.045em}#hits{margin-top:8px;color:#b8c7d9;font-size:12px;letter-spacing:.18em;font-weight:700}#hits b{color:#ffbd63}#caption{position:fixed;right:26px;bottom:24px;color:#8293a8;font-size:10px;letter-spacing:.17em;text-align:right;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="hud"><div id="eyebrow">ARENA 07 · COMBAT TRIAL</div><div id="phase">SPRINT START</div><div id="hits">HITS <b>0 / 5</b></div></div>
+<div id="caption">AUTONOMOUS GAUNTLET&nbsp; · &nbsp;15 SEC LOOP</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x101a2a);
+scene.fog=new THREE.Fog(0x101a2a,15,39);
+
+const camera=new THREE.PerspectiveCamera(42,innerWidth/innerHeight,.1,100);
+camera.position.set(1.5,6.3,12.5);
+const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:"high-performance"});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.8));
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.12;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0x9bc9ff,0x22232d,2.0));
+const keyLight=new THREE.DirectionalLight(0xffe4c2,3.1);
+keyLight.position.set(-5,11,7);
+keyLight.castShadow=true;
+keyLight.shadow.mapSize.set(2048,2048);
+keyLight.shadow.camera.left=-13;keyLight.shadow.camera.right=13;
+keyLight.shadow.camera.top=12;keyLight.shadow.camera.bottom=-10;
+keyLight.shadow.bias=-.00025;
+keyLight.shadow.radius=5;
+scene.add(keyLight);
+const cyanLight=new THREE.PointLight(0x22dfef,38,15,2);
+cyanLight.position.set(-6,4,1);scene.add(cyanLight);
+const amberLight=new THREE.PointLight(0xff743b,30,14,2);
+amberLight.position.set(6,3,-1);scene.add(amberLight);
+
+const mat=(color,roughness=.65,metalness=.05,extra={})=>new THREE.MeshStandardMaterial({color,roughness,metalness,...extra});
+const floorBase=mat(0x151d2b,.88);
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(80,80),floorBase);
+floor.rotation.x=-Math.PI/2;floor.position.y=-.09;floor.receiveShadow=true;scene.add(floor);
+const tileMats=[mat(0x263143,.9),mat(0x1b2636,.9),mat(0x30394a,.88)];
+const tileGeo=new THREE.BoxGeometry(.985,.075,.985);
+for(let x=-9;x<=9;x++)for(let z=-9;z<=9;z++){
+  const m=new THREE.Mesh(tileGeo,tileMats[(x+z+30)%2]);
+  m.position.set(x,-.04,z);m.receiveShadow=true;scene.add(m);
+}
+function addBox(parent,w,h,d,material,pos){
+  const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);
+  m.position.set(pos[0],pos[1],pos[2]);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;
+}
+const scuffMat=new THREE.LineBasicMaterial({color:0x8795a6,transparent:true,opacity:.22});
+for(const [cx,cz,r,start] of [[-2,1.1,1.2,.2],[1.1,.5,.8,1.4],[4,-1,1.4,2.1],[-5,-.5,.75,3.3]]){
+  const pts=[];
+  for(let i=0;i<=36;i++){const a=start+i/36*1.45;pts.push(new THREE.Vector3(cx+Math.cos(a)*r,-.001,cz+Math.sin(a)*r*.62))}
+  scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),scuffMat));
+}
+
+const wallBase=mat(0x29384b,.78,.18);
+addBox(scene,19,.24,.72,wallBase,[0,.12,-3.55]);
+const stripeMats=[mat(0x25394c,.65,.28),mat(0x315267,.62,.3),mat(0x6d4936,.7,.22),mat(0x263c50,.62,.3)];
+for(let i=0;i<20;i++){
+  const x=-9.5+i*.98;
+  addBox(scene,.91,5.45,.53,stripeMats[i%7===2?2:i%2],[x,2.86,-3.58]);
+  addBox(scene,.045,5.35,.018,mat(0x94aeb9,.4,.4,{emissive:0x142b36}),[x+.44,2.86,-3.29]);
+}
+addBox(scene,19,.14,.67,mat(0x78909b,.45,.35),[0,5.62,-3.55]);
+addBox(scene,19,.18,.8,mat(0x172435,.7,.25),[0,.45,-3.55]);
+for(const side of [-1,1]){
+  addBox(scene,.38,5.5,15,wallBase,[side*9.6,2.75,-2.2]);
+  for(let row=0;row<5;row++)
+    addBox(scene,18,.48,1.05,mat(row%2?0x30394b:0x222d3e,.92),[0,.65+row*.55,-6.2-row*.95]);
+}
+for(let i=0;i<4;i++){
+  addBox(scene,18,.12,.16,mat(0x47566a,.6,.3),[0,1.05+i*.55,-6.12-i*.95]);
+}
+addBox(scene,2.8,.8,.24,mat(0x152437,.6,.35,{emissive:0x071c2c}),[0,5.55,-7.1]);
+
+const jointGeo=new THREE.SphereGeometry(.14,16,12);
+function makeRig({primary,secondary,accent,visor,weapon=false}){
+  const root=new THREE.Group();
+  const armor=mat(primary,.42,.48),dark=mat(secondary,.64,.22),glow=mat(accent,.28,.45,{emissive:accent,emissiveIntensity:1.05});
+  const trim=mat(0xc3d4dc,.38,.58);
+  const pelvis=new THREE.Group();pelvis.position.y=1.03;root.add(pelvis);
+  addBox(pelvis,.56,.38,.42,dark,[0,0,0]);
+  addBox(pelvis,.62,.14,.45,armor,[0,.13,0]);
+  const spine=new THREE.Group();spine.position.set(0,.15,0);pelvis.add(spine);
+  addBox(spine,.82,.88,.48,armor,[0,.46,0]);
+  addBox(spine,.57,.48,.055,glow,[0,.5,.254]);
+  addBox(spine,.25,.63,.035,dark,[0,.46,.29]);
+  addBox(spine,.94,.18,.48,dark,[0,.82,0]);
+  const neck=new THREE.Mesh(new THREE.CylinderGeometry(.12,.15,.2,12),trim);neck.position.set(0,.96,0);spine.add(neck);
+  const head=new THREE.Group();head.position.set(0,1.02,0);spine.add(head);
+  const skull=new THREE.Mesh(new THREE.SphereGeometry(.285,20,16),armor);skull.position.y=.22;skull.castShadow=true;head.add(skull);
+  const face=new THREE.Mesh(new THREE.BoxGeometry(.34,.12,.065),mat(visor,.24,.34,{emissive:visor,emissiveIntensity:1.8}));
+  face.position.set(0,.25,.243);head.add(face);
+  const headJoint=head;
+
+  function makeArm(side){
+    const shoulder=new THREE.Group();shoulder.position.set(side*.56,.77,0);spine.add(shoulder);
+    const ball=new THREE.Mesh(jointGeo,armor);ball.scale.set(1.12,1.12,1.05);shoulder.add(ball);
+    const upperLen=.5;
+    const upper=new THREE.Mesh(new THREE.CylinderGeometry(.145,.115,upperLen,14),armor);
+    upper.position.y=-upperLen/2;upper.castShadow=true;shoulder.add(upper);
+    const elbow=new THREE.Group();elbow.position.y=-upperLen;shoulder.add(elbow);
+    const elbowBall=new THREE.Mesh(new THREE.SphereGeometry(.12,14,12),dark);elbow.add(elbowBall);
+    const lowerLen=.45;
+    const lower=new THREE.Mesh(new THREE.CylinderGeometry(.11,.085,lowerLen,14),dark);
+    lower.position.y=-lowerLen/2;lower.castShadow=true;elbow.add(lower);
+    const wrist=new THREE.Group();wrist.position.y=-lowerLen;elbow.add(wrist);
+    const palm=new THREE.Mesh(new THREE.BoxGeometry(.2,.23,.18),armor);palm.position.set(0,-.04,.045);palm.castShadow=true;wrist.add(palm);
+    for(let i=-1;i<=1;i++){
+      const finger=new THREE.Mesh(new THREE.BoxGeometry(.045,.12,.065),trim);
+      finger.position.set(i*.061,-.17,.09);wrist.add(finger);
+    }
+    return {shoulder,elbow,wrist};
+  }
+  const arms=[makeArm(-1),makeArm(1)];
+
+  function makeLeg(side){
+    const hip=new THREE.Group();hip.position.set(side*.23,-.13,0);pelvis.add(hip);
+    const ball=new THREE.Mesh(new THREE.SphereGeometry(.18,14,12),dark);hip.add(ball);
+    const upperLen=.63;
+    const upper=new THREE.Mesh(new THREE.CylinderGeometry(.18,.135,upperLen,14),armor);
+    upper.position.y=-upperLen/2;upper.castShadow=true;hip.add(upper);
+    const knee=new THREE.Group();knee.position.y=-upperLen;hip.add(knee);
+    const kneecap=new THREE.Mesh(new THREE.SphereGeometry(.145,14,12),glow);kneecap.position.z=.07;knee.add(kneecap);
+    const lowerLen=.57;
+    const lower=new THREE.Mesh(new THREE.CylinderGeometry(.135,.095,lowerLen,14),dark);
+    lower.position.y=-lowerLen/2;lower.castShadow=true;knee.add(lower);
+    const ankle=new THREE.Group();ankle.position.y=-lowerLen;knee.add(ankle);
+    const foot=new THREE.Mesh(new THREE.BoxGeometry(.29,.16,.48),armor);
+    foot.position.set(0,-.045,.16);foot.castShadow=true;ankle.add(foot);
+    const toe=new THREE.Mesh(new THREE.BoxGeometry(.25,.06,.23),glow);toe.position.set(0,-.015,.32);ankle.add(toe);
+    return {hip,knee,ankle};
+  }
+  const legs=[makeLeg(-1),makeLeg(1)];
+  let blade=null;
+  if(weapon){
+    const hand=arms[1].wrist;
+    const grip=new THREE.Mesh(new THREE.CylinderGeometry(.045,.052,.25,10),dark);
+    grip.rotation.x=Math.PI/2;grip.position.set(0,-.03,.17);hand.add(grip);
+    const guard=new THREE.Mesh(new THREE.BoxGeometry(.25,.07,.09),trim);guard.position.set(0,-.02,.29);hand.add(guard);
+    blade=new THREE.Mesh(new THREE.CylinderGeometry(.003,.045,.68,10),mat(0x8cfaff,.22,.55,{emissive:0x26dfff,emissiveIntensity:2.2}));
+    blade.rotation.x=Math.PI/2;blade.position.set(0,-.02,.69);hand.add(blade);
+  }
+  return {root,pelvis,spine,head:headJoint,arms,legs,blade};
+}
+
+const hero=makeRig({primary:0xe5edf0,secondary:0x183342,accent:0x29e1df,visor:0x80fff1,weapon:true});
+scene.add(hero.root);
+hero.root.position.set(-4,0,0);
+
+const enemyRoot=new THREE.Group();enemyRoot.position.set(1.85,0,0);scene.add(enemyRoot);
+const enemy=makeRig({primary:0xb87348,secondary:0x442d2c,accent:0xffbb57,visor:0xff7553});
+enemy.root.rotation.y=-Math.PI/2;enemyRoot.add(enemy.root);
+const targetMat=mat(0xffab55,.3,.4,{emissive:0xff5a22,emissiveIntensity:1.8});
+const targetMark=new THREE.Mesh(new THREE.SphereGeometry(.13,16,12),targetMat);
+targetMark.position.set(0,1.52,.31);enemy.spine.add(targetMark);
+
+const arcPts=[
+  new THREE.Vector3(-.48,.68,.7),new THREE.Vector3(-.34,1.12,.82),
+  new THREE.Vector3(-.03,1.48,.88),new THREE.Vector3(.4,1.56,.83),
+  new THREE.Vector3(.78,1.32,.7),new THREE.Vector3(.9,.9,.62)
+];
+const arcCurve=new THREE.CatmullRomCurve3(arcPts);
+const arcMat=new THREE.MeshBasicMaterial({color:0x71fbff,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false});
+const slashArc=new THREE.Mesh(new THREE.TubeGeometry(arcCurve,48,.038,8,false),arcMat);
+hero.root.add(slashArc);slashArc.visible=false;
+
+const ringMat=new THREE.MeshBasicMaterial({color:0xffd17a,transparent:true,opacity:0,side:THREE.DoubleSide,depthWrite:false});
+const shockwave=new THREE.Mesh(new THREE.RingGeometry(.88,1,72),ringMat);
+shockwave.rotation.x=-Math.PI/2;shockwave.position.y=.025;scene.add(shockwave);
+
+const dustCount=180;
+const dustPositions=new Float32Array(dustCount*3);
+const dustGeo=new THREE.BufferGeometry();dustGeo.setAttribute("position",new THREE.BufferAttribute(dustPositions,3));
+const dustMat=new THREE.PointsMaterial({color:0xc5d9de,size:.14,transparent:true,opacity:.65,depthWrite:false,sizeAttenuation:true});
+const dust=new THREE.Points(dustGeo,dustMat);scene.add(dust);
+const randSeeds=Array.from({length:dustCount},(_,i)=>{const a=Math.sin(i*127.1+8.3)*43758.5453;return a-Math.floor(a)});
+
+const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+const smooth=(a,b,t)=>{const x=clamp((t-a)/(b-a));return x*x*(3-2*x)};
+const pulse=(t,c,w)=>Math.exp(-Math.pow((t-c)/w,2));
+function track(t,keys){
+  for(let i=0;i<keys.length-1;i++){
+    const [a,av]=keys[i],[b,bv]=keys[i+1];
+    if(t<=b){const u=clamp((t-a)/(b-a));return av+(bv-av)*u}
+  }
+  return keys[keys.length-1][1];
+}
+const xTrack=[[0,-4.2],[1.45,-3.55],[1.75,-3.45],[3.95,-.35],[4.15,-.1],[5.15,.1],[5.8,.1],[9.2,.1],[12,.1],[13.5,-2.25],[15,-4.2]];
+const yTrack=[[0,0],[1.5,0],[1.72,1.62],[3.95,1.62],[4.18,1.93],[4.52,2.28],[4.86,1.82],[5.13,.08],[5.42,.04],[5.9,0],[8.23,0],[8.47,.23],[8.72,0],[12,0],[15,0]];
+const zTrack=[[0,0],[1.55,0],[1.82,-2.82],[3.98,-2.82],[4.18,-2.38],[5.18,0],[15,0]];
+const yawTrack=[[0,Math.PI/2],[1.55,Math.PI/2],[1.82,Math.PI],[3.98,Math.PI],[4.22,Math.PI*1.5],[5.7,Math.PI*1.5],[7.55,Math.PI*1.5],[8.05,Math.PI*3.5],[12.1,Math.PI*3.5],[13.4,Math.PI*2.5],[15,Math.PI*2.5]];
+const phaseEl=document.getElementById("phase"),hitsEl=document.querySelector("#hits b");
+let closeShot=false,lookTarget=new THREE.Vector3();
+function updateHUD(t){
+  let phase="SPRINT START",hits=0;
+  if(t>=1.55&&t<4.05){phase=`WALL-RUN · ${Math.min(5,Math.floor((t-1.55)*2.3)+1)} STEPS`}
+  else if(t>=4.05&&t<5.12)phase="WALL-JUMP · BACKFLIP";
+  else if(t>=5.12&&t<5.92)phase="ROLL LANDING · CROUCH";
+  else if(t>=5.92&&t<6.58){phase="FIVE-HIT COMBO · JAB"}
+  else if(t>=6.58&&t<7.12){phase="FIVE-HIT COMBO · CROSS";hits=1}
+  else if(t>=7.12&&t<7.58){phase="ROUNDHOUSE KICK";hits=2}
+  else if(t>=7.58&&t<8.22){phase="SPINNING SLASH";hits=3}
+  else if(t>=8.22&&t<9.18){phase="GROUND SLAM · SLOW MOTION";hits=4}
+  else if(t>=9.18&&t<12.1){phase="DUMMY DOWN · RESETTING";hits=5}
+  else if(t>=12.1){phase="RESET · NEXT RUN"}
+  if(t>=6.18)hits=Math.max(hits,1);
+  if(t>=6.72)hits=Math.max(hits,2);
+  if(t>=7.25)hits=Math.max(hits,3);
+  if(t>=7.84)hits=Math.max(hits,4);
+  if(t>=8.62&&t<12.1)hits=5;
+  phaseEl.textContent=phase;hitsEl.textContent=`${hits} / 5`;
+}
+function animateRig(t){
+  const sprint=(1-smooth(1.35,1.68,t))*smooth(-.08,.2,t);
+  const wall=smooth(1.58,1.88,t)*(1-smooth(3.92,4.22,t));
+  const flip=smooth(4.08,4.55,t)*(1-smooth(4.88,5.18,t));
+  const landing=smooth(5.06,5.26,t)*(1-smooth(5.78,5.98,t));
+  const crouch=landing+smooth(8.43,8.68,t)*(1-smooth(8.78,9.0,t));
+  const jab=pulse(t,6.18,.13),cross=pulse(t,6.72,.15),kick=pulse(t,7.25,.16),slash=pulse(t,7.84,.22),slam=smooth(8.38,8.66,t)*(1-smooth(8.9,9.16,t));
+  hero.root.position.set(track(t,xTrack),track(t,yTrack),track(t,zTrack));
+  hero.root.rotation.set(flip*Math.PI*2,track(t,yawTrack),-1.12*wall);
+  const gait=Math.sin(t*10.7);
+  const wallStep=Math.sin((t-1.58)*14.5);
+  hero.pelvis.rotation.x=.08*gait*sprint+.16*crouch-.15*landing;
+  hero.pelvis.rotation.z=.08*wall*wallStep;
+  hero.spine.rotation.x=.07*gait*sprint+.3*crouch-.34*slam+.12*flip;
+  hero.spine.rotation.y=.3*cross-.38*slash+.18*wall*wallStep;
+  hero.spine.rotation.z=.08*wall*wallStep;
+  hero.head.rotation.x=-.08*gait*sprint-.22*crouch;
+  hero.head.rotation.y=-.2*cross+.25*slash;
+
+  const left=hero.arms[0],right=hero.arms[1];
+  left.shoulder.rotation.set(-.34-.55*gait*sprint-.48*wallStep*wall-1.75*jab-1.6*slam,0,-.1-.45*wall);
+  left.elbow.rotation.set(-.92-.22*wall+-.7*jab+.3*slam,0,0);
+  left.wrist.rotation.x=.12*jab-.25*slam;
+  right.shoulder.rotation.set(-.38+.55*gait*sprint+.48*wallStep*wall-1.95*cross-1.35*slash-1.65*slam,0,.1+.42*wall-.65*slash);
+  right.elbow.rotation.set(-.96+.2*wall-.65*cross-.35*slash+.25*slam,0,0);
+  right.wrist.rotation.set(-.15*slash-.25*slam,0,.25*slash);
+
+  for(let i=0;i<2;i++){
+    const phase=i?Math.PI:0,leg=hero.legs[i];
+    const run= Math.sin(t*10.7+phase);
+    const step=Math.sin((t-1.58)*14.5+phase);
+    const kickAmt=i===1?kick:0;
+    leg.hip.rotation.set(.68*run*sprint+.76*step*wall-1.25*flip-.82*crouch-1.52*kickAmt,0,(i?1:-1)*.06*wall);
+    leg.knee.rotation.set(.18+.45*Math.max(0,-run)*sprint+.48*Math.max(0,step)*wall+1.0*flip+.98*crouch+.58*kickAmt,0,0);
+    leg.ankle.rotation.x=-.18*run*sprint-.3*step*wall+.3*crouch-.5*kickAmt;
+  }
+
+  const enemyHit=[pulse(t,6.18,.16),pulse(t,6.72,.17),pulse(t,7.25,.2),pulse(t,7.84,.24),pulse(t,8.62,.28)];
+  const recoil=.08*enemyHit[0]+.15*enemyHit[1]+.28*enemyHit[2]+.38*enemyHit[3]+.2*enemyHit[4];
+  const fall=smooth(8.66,9.22,t)*(1-smooth(12.05,12.88,t));
+  enemyRoot.position.set(1.85+recoil,0,.02*Math.sin(t*20)*enemyHit[2]);
+  enemyRoot.rotation.set(.05*enemyHit[3],-Math.PI/2+.16*enemyHit[3],-.12*enemyHit[0]-.2*enemyHit[1]-.36*enemyHit[2]-.2*enemyHit[3]-1.22*fall);
+  enemy.spine.rotation.x=.18*enemyHit[0]+.25*enemyHit[1]+.38*enemyHit[2]+.3*enemyHit[3]+.25*fall;
+  enemy.spine.rotation.y=.22*enemyHit[1]-.28*enemyHit[3];
+  enemy.head.rotation.x=-.2*enemyHit[2]-.2*fall;
+  enemy.arms[0].shoulder.rotation.x=-.5*enemyHit[0]+.75*enemyHit[2]+1.35*fall;
+  enemy.arms[1].shoulder.rotation.x=-.55*enemyHit[1]-.75*enemyHit[3]-1.35*fall;
+  enemy.arms[0].elbow.rotation.x=-.5-.6*fall;
+  enemy.arms[1].elbow.rotation.x=-.5-.5*fall;
+  enemy.legs[0].hip.rotation.x=.15*enemyHit[2]+.75*fall;
+  enemy.legs[1].hip.rotation.x=-.2*enemyHit[2]-.65*fall;
+  enemy.legs[0].knee.rotation.x=.45*fall;enemy.legs[1].knee.rotation.x=.55*fall;
+  targetMat.emissiveIntensity=1.5+2.8*Math.max(...enemyHit);
+  const arcAge=Math.abs(t-7.84);
+  slashArc.visible=arcAge<.46;
+  arcMat.opacity=slashArc.visible?Math.max(0,1-arcAge/.46)*.9:0;
+  const ringAge=t-8.62;
+  shockwave.visible=ringAge>=0&&ringAge<1.05;
+  if(shockwave.visible){
+    const p=clamp(ringAge/1.05);
+    shockwave.position.set(hero.root.position.x+.22,.025,hero.root.position.z);
+    shockwave.scale.setScalar(.25+4.3*p);
+    ringMat.opacity=.78*(1-p);
+  }else ringMat.opacity=0;
+
+  const events=[5.14,8.62];
+  let activeAge=-1,activeEvent=0;
+  for(let e=0;e<events.length;e++){const age=t-events[e];if(age>=0&&age<.95&&age>activeAge){activeAge=age;activeEvent=e}}
+  dustMat.opacity=activeAge>=0?.7*(1-activeAge/.95):0;
+  for(let i=0;i<dustCount;i++){
+    const e=i<90?0:1,local=i%90,seed=randSeeds[i],seed2=randSeeds[(i*7+31)%dustCount],age=t-events[e],k=i*3;
+    if(age<0||age>.95){dustPositions[k]=0;dustPositions[k+1]=-20;dustPositions[k+2]=0;continue}
+    const angle=seed*Math.PI*2,speed=.5+seed2*2.1;
+    dustPositions[k]=(e===0?-.02:.18)+Math.cos(angle)*speed*age;
+    dustPositions[k+1]=.08+(1.3+seed*1.6)*age-1.5*age*age;
+    dustPositions[k+2]=Math.sin(angle)*speed*age;
+  }
+  dustGeo.attributes.position.needsUpdate=true;
+  updateHUD(t);
+}
+
+const clock=new THREE.Clock();
+let elapsed=0;
+function frame(){
+  requestAnimationFrame(frame);
+  const dt=Math.min(clock.getDelta(),.05);elapsed+=dt;
+  const t=elapsed%15;
+  animateRig(t);
+  const inClose=t>=8.36&&t<9.18;
+  const heroPos=hero.root.position;
+  if(inClose){
+    if(!closeShot){camera.position.set(heroPos.x+2.5,heroPos.y+2.55,heroPos.z+4.75);closeShot=true}
+    lookTarget.set(heroPos.x+.55,heroPos.y+1.15,heroPos.z-.25);
+    camera.position.lerp(new THREE.Vector3(heroPos.x+2.5,heroPos.y+2.55,heroPos.z+4.75),.24);
+    camera.lookAt(lookTarget);
+  }else{
+    closeShot=false;
+    const desired=new THREE.Vector3(heroPos.x+1.15,5.7,11.8);
+    camera.position.lerp(desired,.035);
+    const target=new THREE.Vector3(heroPos.x+.15,1.12,-.65);
+    lookTarget.lerp(target,.055);
+    camera.lookAt(lookTarget);
+  }
+  renderer.render(scene,camera);
+}
+frame();
+addEventListener("resize",()=>{
+  camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>

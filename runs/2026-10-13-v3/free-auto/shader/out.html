@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raymarched Surrealism</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <script type="module">
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+        // Scene, Camera, Renderer Setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
+
+        // Fragment Shader with Rich Raymarching SDF Engine
+        const fragmentShader = `
+            uniform float u_time;
+            uniform vec2 u_resolution;
+            varying vec2 vUv;
+
+            #define MAX_STEPS 90
+            #define SURF_DIST 0.002
+            #define MAX_DIST 60.0
+
+            // Rotation matrix
+            mat2 rot(float a) {
+                float s = sin(a), c = cos(a);
+                return mat2(c, -s, s, c);
+            }
+
+            // Smooth minimum
+            float smin(float a, float b, float k) {
+                float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+                return mix(b, a, h) - k * h * (1.0 - h);
+            }
+
+            // Smooth maximum (for subtraction)
+            float smax(float a, float b, float k) {
+                return -smin(-a, -b, k);
+            }
+
+            // Primitives
+            float sdSphere(vec3 p, float s) {
+                return length(p) - s;
+            }
+
+            float sdBox(vec3 p, vec3 b) {
+                vec3 q = abs(p) - b;
+                return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+            }
+
+            float sdTorus(vec3 p, vec2 t) {
+                vec2 q = vec2(length(p.xz) - t.x, p.y);
+                return length(q) - t.y;
+            }
+
+            float sdCylinder(vec3 p, vec3 c) {
+                return length(p.xz - c.xy) - c.z;
+            }
+
+            float sdCapsule(vec3 p, vec3 a, vec3 b, float r) {
+                vec3 pa = p - a, ba = b - a;
+                float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+                return length(pa - ba * h) - r;
+            }
+
+            float sdOctahedron(vec3 p, float s) {
+                p = abs(p);
+                return (p.x + p.y + p.z - s) * 0.57735027;
+            }
+
+            // Scene Mapping & Morphing
+            struct Surface {
+                float dist;
+                int id;
+                float emissive;
+            };
+
+            Surface map(vec3 p) {
+                // Infinite repetition or displacement wrapper
+                vec3 p1 = p;
+                
+                // Morphing time variables
+                float t = u_time * 0.6;
+                float morph1 = sin(t) * 0.5 + 0.5;
+                float morph2 = cos(t * 0.7) * 0.5 + 0.5;
+
+                // 1. Center morphing blob (Sphere + Octahedron + Box)
+                vec3 pc = p1;
+                pc.xy *= rot(t * 0.2);
+                pc.yz *= rot(t * 0.3);
+                float sph = sdSphere(pc, 1.2);
+                float oct = sdOctahedron(pc, 1.5);
+                float box = sdBox(pc, vec3(0.9));
+                
+                float shape1 = mix(sph, oct, morph1);
+                float shape2 = mix(shape1, box, morph2);
+
+                // 2. Torus orbiting
+                vec3 pt = p1;
+                pt.xz *= rot(-t * 0.5);
+                pt.x -= 3.5;
+                pt.xy *= rot(t);
+                float tor = sdTorus(pt, vec2(1.0, 0.35));
+
+                // 3. Cylinders & Capsules structure
+                vec3 p2 = p1;
+                p2.y -= 1.0;
+                float cyl = sdCylinder(p2, vec2(0.0, 0.0, 0.5));
+                float cap = sdCapsule(p1, vec3(-2, -1, 0), vec3(-2, 3, 0), 0.4);
+
+                // Combine with smooth min for organic blending
+                float blendDist = smin(shape2, tor, 0.8);
+                blendDist = smin(blendDist, cyl, 0.5);
+                blendDist = smin(blendDist, cap, 0.6);
+
+                // Floor plane with wavy displacement
+                float floorDist = p.y + 2.5 + sin(p.x * 0.5 + u_time) * cos(p.z * 0.5 + u_time) * 0.15;
+
+                // Determine material / ID
+                Surface surf;
+                if (floorDist < blendDist) {
+                    surf.dist = floorDist;
+                    surf.id = 1; // Floor
+                    surf.emissive = 0.0;
+                } else {
+                    surf.dist = blendDist;
+                    // Lava cracks on shape2 center
+                    float lavaPattern = sin(pc.x * 10.0 + u_time * 2.0) * sin(pc.y * 10.0) * sin(pc.z * 10.0);
+                    surf.id = 2; // Morphing object
+                    surf.emissive = smoothstep(0.4, 0.5, lavaPattern) * step(blendDist, shape2 + 0.1);
+                }
+
+                return surf;
+            }
+
+            // Normal calculation
+            vec3 calcNormal(vec3 p) {
+                float d = map(p).dist;
+                vec2 e = vec2(0.001, 0.0);
+                vec3 n = d - vec3(
+                    map(p - e.xyy).dist,
+                    map(p - e.yxy).dist,
+                    map(p - e.yyx).dist
+                );
+                return normalize(n);
+            }
+
+            // Ambient Occlusion approximation
+            float calcAO(vec3 pos, vec3 nor) {
+                float occ = 0.0;
+                float sca = 1.0;
+                for (int i = 0; i < 5; i++) {
+                    float hr = 0.01 + 0.05 * float(i);
+                    vec3 aopos = nor * hr + pos;
+                    float dd = map(aopos).dist;
+                    occ += (hr - dd) * sca;
+                    sca *= 0.85;
+                }
+                return clamp(1.0 - 3.0 * occ, 0.0, 1.0);
+            }
+
+            // Soft shadows
+            float calcShadow(vec3 ro, vec3 rd, float mint, float k) {
+                float res = 1.0;
+                float t = mint;
+                for (int i = 0; i < 32; i++) {
+                    float h = map(ro + rd * t).dist;
+                    res = min(res, k * h / t);
+                    t += clamp(h, 0.02, 0.2);
+                    if (res < 0.001 || t > 15.0) break;
+                }
+                return clamp(res, 0.0, 1.0);
+            }
+
+            // Raymarching
+            Surface rayMarch(vec3 ro, vec3 rd) {
+                float dO = 0.0;
+                Surface s;
+                s.id = -1;
+                s.dist = MAX_DIST;
+
+                for (int i = 0; i < MAX_STEPS; i++) {
+                    vec3 p = ro + rd * dO;
+                    s = map(p);
+                    s.dist = dO; // keep track of total distance
+                    if (abs(s.dist) < SURF_DIST || dO > MAX_DIST) break;
+                    dO += s.dist;
+                }
+                return s;
+            }
+
+            void main() {
+                vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
+
+                // Smooth Camera Spline / Flight Path
+                float camTime = u_time * 0.3;
+                vec3 ro = vec3(
+                    sin(camTime) * 6.0,
+                    1.5 + sin(camTime * 0.5) * 1.5,
+                    cos(camTime) * 6.0
+                );
+                vec3 target = vec3(0.0, 0.0, 0.0);
+                
+                // Camera matrix setup
+                vec3 ww = normalize(target - ro);
+                vec3 uu = normalize(cross(ww, vec3(0.0, 1.0, 0.0)));
+                vec3 vv = normalize(cross(uu, ww));
+                vec3 rd = normalize(uv.x * uu + uv.y * vv + 1.5 * ww);
+
+                // Light source position
+                vec3 lightPos = vec3(4.0, 6.0, -3.0);
+
+                // First raymarch
+                Surface surf = rayMarch(ro, rd);
+                vec3 p = ro + rd * surf.dist;
+
+                vec3 col = vec3(0.05, 0.05, 0.08); // Background / Fog color
+
+                if (surf.dist < MAX_DIST) {
+                    vec3 n = calcNormal(p);
+                    vec3 lightDir = normalize(lightPos - p);
+                    
+                    // Lighting components
+                    float diff = max(dot(n, lightDir), 0.0);
+                    float shadow = calcShadow(p, lightDir, 0.1, 16.0);
+                    float ao = calcAO(p, n);
+                    float fresnel = pow(clamp(1.0 + dot(rd, n), 0.0, 1.0), 4.0);
+
+                    if (surf.id == 1) {
+                        // Checkered Floor
+                        float scale = 1.0;
+                        vec2 fw = abs(fract(p.xz * scale) - 0.5) / fwidth(p.xz * scale);
+                        float c = min(fw.x, fw.y);
+                        float check = 1.0 - min(c, 1.0);
+                        vec3 floorCol = mix(vec3(0.08), vec3(0.2), check);
+                        col = floorCol * (diff * shadow * 0.7 + 0.3) * ao;
+
+                        // One-bounce / Reflection ray
+                        vec3 rrd = reflect(rd, n);
+                        Surface refSurf = rayMarch(p + n * 0.02, rrd);
+                        if (refSurf.dist < MAX_DIST) {
+                            vec3 rp = p + rrd * refSurf.dist;
+                            vec3 rn = calcNormal(rp);
+                            float rdiff = max(dot(rn, lightDir), 0.0);
+                            vec3 refCol = vec3(0.3, 0.4, 0.5) * rdiff;
+                            col += refCol * 0.4 * (1.0 - check * 0.5);
+                        }
+
+                    } else if (surf.id == 2) {
+                        // Morphing Object with Lava Cracks & Rim Glow
+                        vec3 baseCol = vec3(0.1, 0.15, 0.25);
+                        vec3 lavaCol = vec3(1.0, 0.4, 0.0) * 4.0;
+                        
+                        vec3 objCol = mix(baseCol, lavaCol, surf.emissive);
+                        col = objCol * (diff * shadow * 0.8 + 0.2) * ao;
+                        col += lavaCol * surf.emissive * 0.5; // Extra glow emission
+                        col += vec3(0.2, 0.5, 1.0) * fresnel * 0.6; // Rim light
+                    }
+
+                    // Distance Fog
+                    float fogFactor = exp(-pow(surf.dist * 0.04, 2.0));
+                    col = mix(vec3(0.05, 0.05, 0.08), col, fogFactor);
+                }
+
+                // Floating Sparks / Particle Field
+                for (int i = 0; i < 15; i++) {
+                    float fi = float(i);
+                    vec3 sparkPos = vec3(
+                        sin(fi * 12.3 + u_time * 0.5) * 4.0,
+                        cos(fi * 45.1 + u_time * 0.8) * 2.0 + 0.5,
+                        sin(fi * 78.5 + u_time * 0.3) * 4.0
+                    );
+                    float dSpark = length(p - sparkPos);
+                    if (surf.dist > length(sparkPos - ro)) {
+                        float sparkGlow = 0.02 / (length(uv - (sparkPos.xy / (sparkPos.z + 5.0))) + 0.02);
+                        col += vec3(1.0, 0.8, 0.4) * sparkGlow * 0.15;
+                    }
+                }
+
+                // Vignette & Filmic Tone Mapping & Gamma Correction
+                uv = gl_FragCoord.xy / u_resolution.xy;
+                col *= 0.5 + 0.5 * pow(16.0 * uv.x * uv.y * (1.0 - uv.x) * (1.0 - uv.y), 0.25);
+                
+                // Tonemapping (ACES approximation)
+                col = (col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14);
+                
+                // Gamma
+                col = pow(clamp(col, 0.0, 1.0), vec3(0.4545));
+
+                gl_FragColor = vec4(col, 1.0);
+            }
+        `;
+
+        // Uniforms & Material
+        const uniforms = {
+            u_time: { value: 0.0 },
+            u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) }
+        };
+
+        const material = new THREE.ShaderMaterial({
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: fragmentShader,
+            uniforms: uniforms,
+            depthWrite: false,
+            depthTest: false
+        });
+
+        // Fullscreen Quad Geometry
+        const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+        scene.add(quad);
+
+        // Window Resize Handler
+        window.addEventListener('resize', () => {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
+        });
+
+        // Animation Loop
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            uniforms.u_time.value = clock.getElapsedTime();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+    </script>
+</body>
+</html>

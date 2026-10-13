@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Parkour Combat Gauntlet</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#000}
+canvas{display:block}
+.h{position:fixed;pointer-events:none;color:#fff;font-family:system-ui,"Segoe UI",Arial,sans-serif;user-select:none}
+#ph{left:26px;top:20px;font-weight:800;font-size:30px;letter-spacing:.16em;text-shadow:0 0 14px #2ce0ff,0 2px 0 #000}
+#sb{left:28px;top:60px;font:600 11px monospace;letter-spacing:.35em;color:#8aa0c0}
+#hc{right:28px;top:18px;font-weight:900;font-size:34px;color:#ff8a2a;text-shadow:0 0 16px #ff5a00,0 2px 0 #000;transform-origin:100% 0}
+#sm{left:50%;bottom:44px;transform:translateX(-50%);font:800 18px monospace;letter-spacing:.6em;color:#ff3550;opacity:0;text-shadow:0 0 12px #f02}
+#fd{position:fixed;inset:0;background:#000;pointer-events:none}
+</style></head><body>
+<div id="ph" class="h"></div><div id="sb" class="h">PARKOUR · COMBAT · GAUNTLET</div><div id="hc" class="h">HITS 0/5</div><div id="sm" class="h">SLOW-MO</div><div id="fd"></div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+const PI=Math.PI,TAU=2*PI,rnd=Math.random,$=i=>document.getElementById(i),ph=$('ph'),hc=$('hc'),sm=$('sm'),fd=$('fd');
+const cl=(x,a=0,b=1)=>x<a?a:x>b?b:x,ss=(a,b,x)=>(x=cl((x-a)/(b-a)),x*x*(3-2*x)),mix=(a,b,t)=>a+(b-a)*t;
+const mixP=(A,B,t)=>t<=0?A:A.map((v,i)=>v+(B[i]-v)*t),env=(T,a,h,b)=>T<h?ss(a,h,T):1-ss(h+.08,b,T);
+
+const R=new THREE.WebGLRenderer({antialias:true});
+R.setPixelRatio(Math.min(devicePixelRatio,2));R.setSize(innerWidth,innerHeight);
+R.shadowMap.enabled=true;R.shadowMap.type=THREE.PCFSoftShadowMap;R.toneMapping=THREE.ACESFilmicToneMapping;
+document.body.appendChild(R.domElement);
+const S=new THREE.Scene(),FOG=0x0a0d15;S.background=new THREE.Color(FOG);S.fog=new THREE.Fog(FOG,20,72);
+const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,200);
+addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();R.setSize(innerWidth,innerHeight)});
+
+const tex=(n,draw,rep)=>{const c=document.createElement('canvas');c.width=c.height=n;draw(c.getContext('2d'));const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=8;if(rep){t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(...rep)}return t};
+const M=(c,o)=>new THREE.MeshStandardMaterial({color:c,roughness:.7,metalness:.1,...o}),B=c=>new THREE.MeshBasicMaterial({color:c});
+const mesh=(g,m,p,cs=1)=>{const o=new THREE.Mesh(g,m);o.castShadow=!!cs;o.receiveShadow=true;p.add(o);return o},box=(x,y,z)=>new THREE.BoxGeometry(x,y,z);
+const G=()=>new THREE.Group(),jt=(p,x,y,z=0)=>{const g=G();g.position.set(x,y,z);p.add(g);return g};
+const cap=(r,l,m,p,y)=>{const o=mesh(new THREE.CapsuleGeometry(r,l,4,12),m,p);o.position.y=y;return o};
+
+// arena: pavimento a scacchi, segni di usura, muro a strisce
+const fl=mesh(new THREE.PlaneGeometry(60,60),M(0xffffff,{roughness:.85,map:tex(512,x=>{for(let i=0;i<64;i++){x.fillStyle=(i+(i>>3))%2?'#2a303e':'#3c4354';x.fillRect(i%8*64,(i>>3)*64,64,64)}x.strokeStyle='rgba(0,0,0,.45)';x.lineWidth=3;for(let k=0;k<=512;k+=64){x.beginPath();x.moveTo(k,0);x.lineTo(k,512);x.moveTo(0,k);x.lineTo(512,k);x.stroke()}},[7.5,7.5])}),S,0);fl.rotation.x=-PI/2;
+const scM=M(0xffffff,{roughness:.95,transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,map:tex(256,x=>{x.lineCap='round';for(let i=0;i<40;i++){const d=i%6>0,a=60+rnd()*136,b=60+rnd()*136;x.strokeStyle=d?`rgba(8,6,4,${.15+rnd()*.4})`:'rgba(210,215,230,.15)';x.lineWidth=d?2+rnd()*9:1+rnd()*2;x.beginPath();x.moveTo(a,b);x.quadraticCurveTo(a+(rnd()-.5)*140,b+(rnd()-.5)*140,a+(rnd()-.5)*180,b+(rnd()-.5)*180);x.stroke()}const g=x.createRadialGradient(128,128,30,128,128,128);g.addColorStop(0,'#000');g.addColorStop(1,'rgba(0,0,0,0)');x.globalCompositeOperation='destination-in';x.fillStyle=g;x.fillRect(0,0,256,256)})});
+const pg=new THREE.PlaneGeometry(1,1);
+for(let i=0;i<18;i++){const d=mesh(pg,scM,S,0),s=1.4+rnd()*2.8;d.scale.set(s,s,1);d.rotation.set(-PI/2,0,rnd()*TAU);d.position.set(-5.5+rnd()*10,.012,-14+rnd()*14)}
+const stT=tex(256,x=>{x.fillStyle='#1b1e27';x.fillRect(0,0,256,256);x.fillStyle='#d9dde6';for(let i=-2;i<3;i++){x.beginPath();x.moveTo(i*128,256);x.lineTo(i*128+64,256);x.lineTo(i*128+320,0);x.lineTo(i*128+256,0);x.fill()}},[11,4]);
+mesh(box(.5,8,22),M(0xffffff,{map:stT,roughness:.6}),S).position.set(-6.25,4,-5);
+mesh(box(.6,.14,22),B(0x22d3ff),S,0).position.set(-6.25,8.07,-5);
+
+// tribune vuote e muro perimetrale
+const wm=M(0x232836),tm=M(0x272c39,{roughness:.9});
+const seats=new THREE.InstancedMesh(box(.62,.42,.5),M(0xffffff,{roughness:.6}),2400);S.add(seats);
+const o3=new THREE.Object3D(),col=new THREE.Color();let n=0;
+for(let s=0;s<4;s++){const a=s*PI/2,sn=Math.sin(a),cs=Math.cos(a);
+ const w=mesh(box(36,1.6,.5),wm,S);w.position.set(sn*18,.8,cs*18);w.rotation.y=a;
+ const st=mesh(box(36,.08,.56),B(s%2?0x22d3ff:0xff2d95),S,0);st.position.set(sn*18,1.62,cs*18);st.rotation.y=a;
+ for(let i=0;i<7;i++){const d=19.2+i*1.3,h=1.8+i*.8,L=38+i*2.6,t=mesh(box(L,h,1.3),tm,S,0);t.position.set(sn*d,h/2,cs*d);t.rotation.y=a;
+  for(let u=.8-L/2;u<L/2-.5;u++){o3.position.set(u*cs+(d+.15)*sn,h+.21,(d+.15)*cs-u*sn);o3.rotation.y=a;o3.updateMatrix();seats.setMatrixAt(n,o3.matrix);seats.setColorAt(n++,col.set(((u+60)/6|0)%2?0x31416e:0x6e2a3a))}}}
+seats.count=n;
+for(let s=0;s<4;s++){const a=s*PI/2+PI/4,sn=Math.sin(a),cs=Math.cos(a);mesh(new THREE.CylinderGeometry(.25,.4,24,8),wm,S,0).position.set(sn*31,12,cs*31);const hd=mesh(box(3.4,1.5,.5),B(0xfff3d6),S,0);hd.position.set(sn*30.6,24,cs*30.6);hd.lookAt(0,10,0)}
+
+// luci
+S.add(new THREE.HemisphereLight(0x90a6dc,0x1a1410,.6));
+const sun=new THREE.DirectionalLight(0xfff0dc,2.6);sun.position.set(8,18,4);sun.target.position.set(-1,0,-6);S.add(sun,sun.target);
+sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);const sc=sun.shadow.camera;sc.left=sc.bottom=-15;sc.right=sc.top=15;sc.far=60;sc.updateProjectionMatrix();sun.shadow.bias=-.0004;sun.shadow.normalBias=.03;
+const rim=new THREE.DirectionalLight(0x5c7dff,1.6);rim.position.set(-8,7,-16);S.add(rim);
+const pL=(c,i,x,y,z,d=30)=>{const l=new THREE.PointLight(c,i,d,1.5);l.position.set(x,y,z);S.add(l);return l};
+pL(0xff2d95,30,4.8,3.2,-6);pL(0x22d3ff,30,-4.6,6,-8);const boom=pL(0xff8a2a,0,0,.6,-2.5,14);
+
+// lottatore: gerarchia di giunti, pivot sul bacino
+const dk=M(0x1c1f28,{roughness:.5}),og=M(0xff6a1a,{roughness:.35,metalness:.35}),sk=M(0xc9ced8,{roughness:.3,metalness:.5});
+const F=G();F.rotation.order='YXZ';S.add(F);
+mesh(box(.34,.18,.22),dk,F);
+const spine=jt(F,0,.07);cap(.17,.26,og,spine,.27).scale.z=.72;mesh(box(.36,.07,.25),dk,spine).position.y=.03;
+const neck=jt(spine,0,.58);mesh(new THREE.SphereGeometry(.13,20,16),sk,neck).position.y=.15;mesh(box(.2,.05,.06),B(0x29e6ff),neck,0).position.set(0,.17,.105);
+const arm=s=>{const sh=jt(spine,.25*s,.48);cap(.062,.2,dk,sh,-.15);const el=jt(sh,0,-.31);cap(.052,.18,og,el,-.13);const wr=jt(el,0,-.28);mesh(box(.09,.12,.09),sk,wr).position.y=-.05;return{sh,el,wr}};
+const leg=s=>{const hp=jt(F,.11*s,-.1);cap(.08,.29,dk,hp,-.22);const kn=jt(hp,0,-.45);cap(.065,.3,og,kn,-.21);const an=jt(kn,0,-.43),f=mesh(box(.11,.07,.26),dk,an);f.position.set(0,-.035,.06);return{hp,kn,an,f}};
+const LA=arm(1),RA=arm(-1),LL=leg(1),RL=leg(-1);
+const blade=jt(RA.wr,0,-.08);mesh(box(.16,.03,.06),sk,blade,0);mesh(box(.03,.95,.1),B(0xaef6ff),blade,0).position.y=-.55;
+
+// manichino
+const dum=G();S.add(dum);const dm=M(0x9a6236,{roughness:.8,emissive:0xff4010,emissiveIntensity:0});
+mesh(new THREE.CylinderGeometry(.42,.5,.1,24),M(0x30343e),dum).position.y=.05;
+mesh(new THREE.CylinderGeometry(.07,.07,.5,10),M(0x5a606c,{metalness:.7,roughness:.3}),dum).position.y=.35;
+cap(.28,.62,dm,dum,1.02);mesh(new THREE.SphereGeometry(.19,18,14),dm,dum).position.y=1.68;
+for(const[y,z]of[[1.25,.13],[1.25,-.13],[.8,0]]){const p=mesh(new THREE.CylinderGeometry(.04,.04,.4,8),dm,dum);p.rotation.z=PI/2;p.position.set(-.38,y,z)}
+
+// polvere e scintille
+const DN=600,dp=new Float32Array(DN*3).fill(-99),dv=new Float32Array(DN*3),dc=new Float32Array(DN*3),dcb=new Float32Array(DN*3),dl=new Float32Array(DN);let di=0;
+const dg=new THREE.BufferGeometry();dg.setAttribute('position',new THREE.BufferAttribute(dp,3));dg.setAttribute('color',new THREE.BufferAttribute(dc,3));
+const dust=new THREE.Points(dg,new THREE.PointsMaterial({size:.5,vertexColors:true,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,map:tex(64,x=>{const g=x.createRadialGradient(32,32,0,32,32,32);g.addColorStop(0,'rgba(255,255,255,1)');g.addColorStop(1,'rgba(255,255,255,0)');x.fillStyle=g;x.fillRect(0,0,64,64)})}));dust.frustumCulled=false;S.add(dust);
+function spawn(x,y,z,n,sp,up,c=[.42,.37,.3]){for(let k=0;k<n;k++){const i=di++%DN,j=i*3,a=rnd()*TAU,s=sp*(.25+rnd()*.75);dp.set([x+Math.cos(a)*.15,y+rnd()*.1,z+Math.sin(a)*.15],j);dv.set([Math.cos(a)*s,up*(.3+rnd()),Math.sin(a)*s],j);dcb.set(c,j);dl[i]=.7+rnd()*.5}}
+
+// scia della lama e anelli d'urto
+const TN=40,tp=new Float32Array(TN*6),tc=new Float32Array(TN*6),ti=[];for(let i=0;i<TN-1;i++){const a=2*i;ti.push(a,a+1,a+2,a+1,a+3,a+2)}
+const tg=new THREE.BufferGeometry();tg.setAttribute('position',new THREE.BufferAttribute(tp,3));tg.setAttribute('color',new THREE.BufferAttribute(tc,3));tg.setIndex(ti);
+const trail=new THREE.Mesh(tg,new THREE.MeshBasicMaterial({vertexColors:true,transparent:true,depthWrite:false,side:THREE.DoubleSide,blending:THREE.AdditiveBlending}));trail.frustumCulled=false;S.add(trail);
+const rings=[0x6fdcff,0xff7a2a].map(c=>{const r=new THREE.Mesh(new THREE.RingGeometry(.86,1,80),new THREE.MeshBasicMaterial({color:c,transparent:true,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending}));r.rotation.x=-PI/2;r.visible=false;S.add(r);return r});
+
+// pose: [sp,sy,sz,collo, lsx,lsz,lgomito, rsx,rsz,rgomito, lanca x,z,lginocchio,lcaviglia, ranca x,z,rginocchio,rcaviglia]
+const ST=[.15,.25,0,-.1,-.75,.2,-2,-.55,-.2,-2.2,-.35,.12,.55,0,.05,-.12,.35,0],
+CR=[.55,0,0,.1,-.5,.35,-.9,-.5,-.35,-.9,-1.5,.2,2.2,0,-1.5,-.2,2.2,0],
+START=[.85,0,0,.2,.5,.1,-.4,-.9,-.1,-.6,-1.6,.1,2.1,0,-.4,-.1,1.4,0],
+JMP=[.1,0,0,-.2,-2.6,.3,-.3,-2.6,-.3,-.3,-.2,.1,.15,.5,.1,-.1,.3,.5],
+TUCK=[.7,0,0,.5,-1.3,.25,-1.6,-1.3,-.25,-1.6,-2.1,.15,2.5,.6,-2.1,-.15,2.5,.6],
+LAND=[.4,0,0,0,-1.2,.8,-.3,-1.2,-.8,-.3,-1.3,.2,1.9,0,-1.3,-.2,1.9,0],
+ROLL=[1.1,0,0,.7,-1.4,.3,-1.5,-1.4,-.3,-1.5,-2.2,.15,2.5,.5,-2.2,-.15,2.5,.5],
+JAB=[.25,-.35,0,-.15,-1.55,.05,-.05,-.6,-.2,-2.2,-.5,.12,.65,0,.1,-.12,.35,0],
+CRS=[.3,.6,0,-.2,-.7,.25,-2.1,-1.55,-.05,-.05,-.45,.12,.55,0,.25,-.12,.15,0],
+KCK=[.1,0,-.55,0,-.5,.9,-1.2,-.2,-.6,-1,-.05,.25,.25,0,-.3,-1.45,.15,.6],
+SLS=[.2,0,0,0,-.7,.3,-2,-.1,-1.5,-.15,-.5,.35,.9,0,-.5,-.35,.9,0],
+SUP=[-.2,0,0,-.3,-2.9,.2,-.3,-2.9,-.2,-.3,-.7,.1,1.1,.4,-.7,-.1,1.1,.4],
+SHT=[.9,0,0,.3,-1.25,.1,-.1,-1.25,-.1,-.1,-1.7,.35,2.3,0,-1.7,-.35,2.3,0],
+VIC=[-.05,.2,0,-.3,-2.8,.4,-.4,-.3,-.3,-.7,-.15,.12,.2,0,.05,-.12,.15,0];
+
+const Z=-2.5,WX=-6,LOOP=13.5,HT=[6.8,7.45,8.42,9.69,10.78];
+const NAMES=[[2,'SPRINT'],[3.6,'WALL RUN'],[4,'WALL JUMP'],[5,'BACKFLIP'],[5.8,'ROLL LANDING'],[6.5,'CROUCH'],[7.15,'JAB'],[7.85,'CROSS'],[8.9,'ROUNDHOUSE KICK'],[10.1,'SPINNING SLASH'],[11.6,'GROUND SLAM'],[12.6,'K.O.'],[99,'RESET']];
+const PH=T=>T<2?TAU*(1.4*T+.35*T*T):TAU*(4.2+3.2*(T-2));
+const run=(f,ln)=>{const s=Math.sin(f),c=Math.cos(f);return[ln,.25*s,0,-.15,.9*s,.12,-1.4,-.9*s,-.12,-1.4,-.35-.85*s,.05,.25+1.4*Math.max(0,c),0,-.35+.85*s,-.05,.25+1.4*Math.max(0,-c),0]};
+// distanza bacino-suolo dalla gamba piu' distesa: tiene i piedi appoggiati (anche sul muro)
+const drop=c=>.17+Math.max((.45*Math.cos(c[10])+.43*Math.cos(c[10]+c[12]))*Math.cos(c[11]),(.45*Math.cos(c[14])+.43*Math.cos(c[14]+c[16]))*Math.cos(c[15]));
+let fx=0,dX=0,dV=0,tl=0,tv=0,fall=0,hits=0,step=-1,ringT=-99,ix=2,flash=0,boomI=0,shake=0,pop=0,hs=0,T=0,cut=1,wasSlow=false,nm='',last=performance.now();
+
+function solve(T,dt){
+ const o={P:ST,x:0,wx:0,z:Z,ya:0,gw:1,yaw:PI/2,pitch:0,roll:0,flat:1};
+ if(T<2){const u=(T/2)**1.3;o.P=mixP(START,run(PH(T),.4),ss(.15,.6,T));o.x=mix(-2,-4.4,u);o.z=mix(-12.5,-7.5,u);o.yaw=-.45*(1-ss(1.5,2,T))}
+ else if(T<3.6){const u=(T-2)/1.6,w=ss(2,2.3,T);o.roll=-w+.15*ss(3.2,3.6,T);o.P=run(PH(T),.2);o.x=mix(-4.4,WX,w);o.wx=-Math.sin(o.roll)*w;o.z=mix(-7.5,Z,u);o.gw=1-w;o.ya=w*(1+1.9*Math.sin(PI*u*.8));o.yaw=0}
+ else if(T<4){const e=ss(3.6,4,T);o.P=mixP(run(PH(T),.2),JMP,ss(3.6,3.8,T));o.x=mix(WX,-4,e);o.wx=.751*(1-e);o.gw=0;o.ya=mix(2.117,3,e);o.yaw=PI/2*e;o.roll=-.85*(1-e);o.flat=1-e}
+ else if(T<5){const u=T-4;o.P=mixP(mixP(JMP,LAND,ss(.55,.95,u)),TUCK,ss(.05,.3,u)*(1-ss(.6,.85,u)));o.x=mix(-4,-.9,u);o.gw=0;o.ya=3+4*u-6.35*u*u;o.pitch=-TAU*ss(0,1,u);o.flat=ss(.8,1,u)}
+ else if(T<5.8){const k=ss(5,5.15,T)*(1-ss(5.6,5.8,T));o.P=mixP(mixP(LAND,CR,ss(5.55,5.8,T)),ROLL,k);o.x=mix(-.9,.9,ss(5.05,5.75,T));o.gw=1-k;o.ya=.62*k;o.pitch=TAU*ss(5.12,5.68,T);o.flat=1-k}
+ else{let P=mixP(CR,ST,ss(6.15,6.5,T));P=mixP(P,JAB,env(T,6.55,6.8,7.15));P=mixP(P,CRS,env(T,7.15,7.45,7.85));P=mixP(P,KCK,env(T,7.9,8.42,8.9));P=mixP(P,SLS,ss(8.9,9.1,T)*(1-ss(9.95,10.15,T)));P=mixP(P,CR,ss(10,10.15,T));P=mixP(P,SUP,ss(10.15,10.4,T));P=mixP(P,SHT,ss(10.55,10.78,T));o.P=mixP(P,VIC,ss(11.5,12.3,T));
+  if(T<10.8)fx+=(dX-(T<7.85?1.1:T<8.9?1.25:T<10.1?1.4:.95)-fx)*(1-Math.exp(-dt*5));
+  o.x=fx;o.ya=1.5*Math.sin(PI*cl((T-10.15)/.63));o.yaw=PI/2+PI/2*env(T,7.9,8.42,8.9)-TAU*ss(8.95,10.05,T)}
+ if(T<5.8)fx=o.x;
+ return o}
+
+const cur=ST.slice();
+function apply(P,flat,dt){const k=1-Math.exp(-dt*40),c=cur;for(let i=0;i<18;i++)c[i]+=(P[i]-c[i])*k;
+ spine.rotation.set(c[0],c[1],c[2]);neck.rotation.set(c[3]-c[0]*.4,-c[1]*.5,0);
+ for(const[A,j]of[[LA,4],[RA,7]]){A.sh.rotation.set(c[j],0,c[j+1]);A.el.rotation.x=c[j+2];A.wr.rotation.x=c[j+2]*.25}
+ for(const[L,j]of[[LL,10],[RL,14]]){L.hp.rotation.set(c[j],0,c[j+1]);L.kn.rotation.x=c[j+2];L.an.rotation.x=c[j+3]-(c[j]+c[j+2])*flat}}
+
+function reset(){dX=2.1;dV=tl=tv=fall=hits=0;step=-1;ringT=-99;hc.textContent='HITS 0/5';cut=1}
+reset();
+const v1=new THREE.Vector3(),v2=new THREE.Vector3(),tgv=new THREE.Vector3(),lk=new THREE.Vector3(),camP=new THREE.Vector3(),camL=new THREE.Vector3();
+
+function frame(now){requestAnimationFrame(frame);
+ const dt=cl((now-last)/1000,0,.05);last=now;
+ const slow=T>10.5&&T<11.3,dS=dt*(hs>0?.06:slow?.3:1);hs-=dt;
+ let pT=T;T+=dS;if(T>=LOOP){T-=LOOP;pT=-1;reset()}
+ const X=t=>pT<t&&T>=t,s=solve(T,dS),P=F.position;
+ apply(s.P,s.flat,dS);const d=drop(cur);
+ P.set(s.x+s.wx*d,s.ya+s.gw*d,s.z);F.rotation.set(s.pitch,s.yaw,s.roll);
+ const bs=ss(8.75,8.95,T)*(1-ss(10.1,10.3,T));blade.visible=bs>.01;blade.scale.set(1,Math.max(bs,.01),1);
+ F.updateMatrixWorld(true);if(!fall)ix=fx+.75;
+ // polvere: passi, spinta dal muro, atterraggi
+ if(T<3.6){const si=Math.floor(PH(T)/PI);if(si!==step){step=si;const a=LL.f.getWorldPosition(v1),b=RL.f.getWorldPosition(v2),p=(T<2?a.y<b.y:a.x<b.x)?a:b;spawn(p.x+(T<2?0:.12),p.y,p.z,7,.9,.5)}}
+ if(X(3.62))spawn(WX+.2,2.1,Z,26,1.6,.4);
+ if(X(5))spawn(P.x,.05,Z,60,2.8,.8);
+ if(X(5.72))spawn(P.x,.05,Z,36,2,.6);
+ HT.forEach((h,i)=>{if(!X(h))return;hits=i+1;pop=.8;flash=1;hc.textContent='HITS '+hits+'/5';
+  if(i<4){hs=.08;tv+=[3,3.4,4.6,4.2][i];dV+=[.6,.8,1.2,1][i];spawn(dX-.3,[1.25,1.25,1,1.3][i],Z,26,2.6,1.8,[1,.55,.2])}
+  else{fall=1;tv+=1.6;dV+=1.4;ringT=T;shake=.3;boomI=1;spawn(ix,.05,Z,150,5.5,1.3);spawn(ix,.2,Z,50,3.5,3.5,[1,.6,.25])}});
+ // manichino: molla sui colpi, caduta libera dopo lo slam
+ tv+=(fall?14*Math.sin(tl+.08):-60*tl-6*tv)*dS;tl+=tv*dS;
+ if(tl>PI/2){tl=PI/2;if(tv>2){spawn(dX+1.1,.05,Z,60,2.4,.7);shake=Math.max(shake,.14)}tv*=-.3}
+ dV*=Math.exp(-4*dS);dX+=dV*dS;dum.position.set(dX,.3*Math.sin(tl),Z);dum.rotation.z=-tl;
+ flash*=Math.exp(-9*dS);dm.emissiveIntensity=flash*2.2;boomI*=Math.exp(-5*dS);boom.intensity=boomI*90;boom.position.x=ix;shake*=Math.exp(-5*dS);
+ // scia della lama
+ tp.copyWithin(6,0,TN*6-6);blade.localToWorld(v1.set(0,-.1,0));blade.localToWorld(v2.set(0,-1.03,0));tp.set([v1.x,v1.y,v1.z,v2.x,v2.y,v2.z]);
+ const te=ss(8.95,9.05,T)*(1-ss(10,10.25,T));for(let i=0;i<TN;i++){const f=(1-i/TN)**1.5*te;tc.set([.15*f,.45*f,.9*f,.6*f,f,f],i*6)}
+ tg.attributes.position.needsUpdate=tg.attributes.color.needsUpdate=true;
+ for(let i=0;i<DN;i++){if(dl[i]<=0)continue;const j=i*3,f=Math.exp(-2.2*dS);dl[i]-=dS*.75;dv[j]*=f;dv[j+2]*=f;dv[j+1]-=1.6*dS;for(let a=0;a<3;a++)dp[j+a]+=dv[j+a]*dS;if(dp[j+1]<.03){dp[j+1]=.03;dv[j+1]=0}const l=Math.max(dl[i],0);for(let a=0;a<3;a++)dc[j+a]=dcb[j+a]*l;if(l<=0)dp[j+1]=-99}
+ dg.attributes.position.needsUpdate=dg.attributes.color.needsUpdate=true;
+ rings.forEach((r,j)=>{const a=(T-ringT-j*.12)/1.1;r.visible=a>0&&a<1;if(r.visible){const q=.3+7*(1-(1-a)**3);r.scale.set(q,q,1);r.material.opacity=1-a;r.position.set(ix,.04+j*.01,Z)}});
+ // camera: inseguimento con ritardo, stacco netto sul primo piano in slow-motion
+ const up=Math.max(0,P.y-1.1);
+ if(T<3.65){tgv.set(P.x+3.6,P.y+2,P.z-4.8);lk.set(P.x-.5,P.y+.2,P.z+3)}
+ else{const m=T<5.8?P.x:(fx+dX)/2;tgv.set(Math.max(m-2,-3.8),2.5+.4*up,Z+6.6);lk.set(m+.3,1.05+.5*up,Z)}
+ if(slow){const k=(T-10.5)/.8;cam.position.set(ix-.2+.15*k,.35+.3*k,Z+2.2-.4*k);camL.set(ix-.1,.85,Z);cam.fov=48}
+ else{if(wasSlow||cut){camP.copy(tgv);camL.copy(lk);cut=0}else{camP.lerp(tgv,1-Math.exp(-dt*2.2));camL.lerp(lk,1-Math.exp(-dt*4))}cam.position.copy(camP);cam.fov=55}
+ wasSlow=slow;cam.position.x+=(rnd()-.5)*shake;cam.position.y+=(rnd()-.5)*shake;cam.lookAt(camL);cam.updateProjectionMatrix();
+ const nn=NAMES.find(p=>T<p[0])[1];if(nn!==nm)ph.textContent=nm=nn;
+ sm.style.opacity=slow?.65+.35*Math.sin(now*.02):0;
+ fd.style.opacity=Math.max(1-ss(0,.25,T),ss(12.95,13.5,T));
+ hc.style.transform=`scale(${1+pop})`;pop*=Math.exp(-7*dt);
+ R.render(S,cam)}
+requestAnimationFrame(frame);
+</script></body></html>
