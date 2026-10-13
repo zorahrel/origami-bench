@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rube Goldberg Chain Reaction</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #050508;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #fff;
+            user-select: none;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+        .stage-indicator {
+            background: rgba(20, 20, 30, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            backdrop-filter: blur(5px);
+        }
+        .stage-indicator .num {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        .stage-indicator.active {
+            background: rgba(241, 196, 15, 0.2);
+            border-color: #f1c40f;
+            color: #f1c40f;
+            box-shadow: 0 0 15px rgba(241, 196, 15, 0.3);
+            transform: translateX(5px);
+        }
+        .stage-indicator.active .num {
+            background: #f1c40f;
+            color: #000;
+        }
+        .stage-indicator.completed {
+            background: rgba(46, 204, 113, 0.15);
+            border-color: #2ecc71;
+            color: #2ecc71;
+        }
+        .stage-indicator.completed .num {
+            background: #2ecc71;
+            color: #000;
+        }
+        #title {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            font-size: 12px;
+            letter-spacing: 2px;
+            color: rgba(255, 255, 255, 0.4);
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div id="hud">
+        <div class="stage-indicator" id="stage-1"><div class="num">1</div>Domino Curve Cascade</div>
+        <div class="stage-indicator" id="stage-2"><div class="num">2</div>Ramp Ball Roll</div>
+        <div class="stage-indicator" id="stage-3"><div class="num">3</div>Seesaw Launcher</div>
+        <div class="stage-indicator" id="stage-4"><div class="num">4</div>Block Stack Collapse</div>
+        <div class="stage-indicator" id="stage-5"><div class="num">5</div>Flag & Light Activation</div>
+    </div>
+    <div id="title">Rube Goldberg Autonomous System</div>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+        // --- SCENE SETUP ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x060609);
+        scene.fog = new THREE.FogExp2(0x060609, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        container.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xfff5e6, 1.5);
+        dirLight.position.set(15, 25, 15);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 60;
+        const d = 20;
+        dirLight.shadow.camera.left = -d;
+        dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d;
+        dirLight.shadow.camera.bottom = -d;
+        dirLight.shadow.bias = -0.0005;
+        scene.add(dirLight);
+
+        const pointLight = new THREE.PointLight(0xffaa00, 0, 10);
+        pointLight.position.set(-1.5, 2, -11.5);
+        scene.add(pointLight);
+
+        // --- ENVIRONMENT ---
+        const floorGeo = new THREE.PlaneGeometry(100, 100);
+        const floorMat = new THREE.MeshStandardMaterial({ 
+            color: 0x0f0f14, 
+            roughness: 0.8,
+            metalness: 0.2
+        });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // Grid lines overlay
+        const gridHelper = new THREE.GridHelper(60, 60, 0x222233, 0x11111a);
+        gridHelper.position.y = 0.001;
+        scene.add(gridHelper);
+
+        // --- SYSTEM COMPONENTS & STATE ---
+        const clock = new THREE.Clock();
+        let loopTime = 0;
+        const DURATION = 11.0;
+
+        // Materials
+        const woodMat = new THREE.MeshStandardMaterial({ color: 0x8e44ad, roughness: 0.4 });
+        const metalMat = new THREE.MeshStandardMaterial({ color: 0xbdc3c7, metalness: 0.8, roughness: 0.2 });
+        const ballMat = new THREE.MeshStandardMaterial({ color: 0xe74c3c, roughness: 0.3, metalness: 0.4 });
+        const ballMat2 = new THREE.MeshStandardMaterial({ color: 0x3498db, roughness: 0.3, metalness: 0.4 });
+        const blockMat = new THREE.MeshStandardMaterial({ color: 0x2ecc71, roughness: 0.5 });
+        const rampMat = new THREE.MeshStandardMaterial({ color: 0x34495e, roughness: 0.4, metalness: 0.5 });
+        const flagMat = new THREE.MeshStandardMaterial({ color: 0xe67e22, roughness: 0.4, side: THREE.DoubleSide });
+
+        // --- BUILD STAGE 1: DOMINOES ---
+        const dominoCount = 14;
+        const dominoes = [];
+        const dominoGeo = new THREE.BoxGeometry(0.2, 0.8, 0.5);
+        
+        // Curve path parameters (S-curve)
+        const curvePoints = [];
+        for (let i = 0; i < dominoCount; i++) {
+            const t = i / (dominoCount - 1);
+            // parametric curve from (-6, 5) to (-1, 0)
+            const x = -6 + t * 5;
+            const z = 5 - Math.sin(t * Math.PI * 1.2) * 3 - t * 2;
+            
+            // Calculate tangent angle
+            let nextT = Math.min(1, (i + 1) / (dominoCount - 1));
+            let nextX = -6 + nextT * 5;
+            let nextZ = 5 - Math.sin(nextT * Math.PI * 1.2) * 3 - nextT * 2;
+            if (i === dominoCount - 1) {
+                nextT = 1;
+                nextX = x + (x - (-6 + (i-1)/(dominoCount-1)*5));
+                nextZ = z + (z - (5 - Math.sin((i-1)/(dominoCount-1) * Math.PI * 1.2) * 3 - (i-1)/(dominoCount-1)*2));
+            }
+            const angle = Math.atan2(nextX - x, nextZ - z);
+
+            const mesh = new THREE.Mesh(dominoGeo, woodMat);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.position.set(x, 0.4, z);
+            mesh.rotation.y = angle;
+            scene.add(mesh);
+
+            dominoes.push({
+                mesh: mesh,
+                basePos: new THREE.Vector3(x, 0.4, z),
+                baseRotY: angle,
+                toppleDelay: i * 0.12, // sequential timing
+                duration: 0.3
+            });
+        }
+
+        // --- BUILD STAGE 2: RAMP & BALL 1 ---
+        // Ramp
+        const rampLength = 5;
+        const rampGeo = new THREE.BoxGeometry(0.8, 0.1, rampLength);
+        const ramp = new THREE.Mesh(rampGeo, rampMat);
+        ramp.position.set(-0.5, 0.5, -2.5);
+        ramp.rotation.x = -0.35; // tilt down towards -z
+        ramp.castShadow = true;
+        ramp.receiveShadow = true;
+        scene.add(ramp);
+
+        // Ball 1 (Triggered by last domino)
+        const ballGeo = new THREE.SphereGeometry(0.25, 32, 32);
+        const ball1 = new THREE.Mesh(ballGeo, ballMat);
+        ball1.castShadow = true;
+        scene.add(ball1);
+
+        const ball1StartPos = new THREE.Vector3(-0.9, 1.2, -0.3);
+        const ball1LaunchTime = dominoCount * 0.12 + 0.1;
+
+        // --- BUILD STAGE 3: SEESAW & BALL 2 ---
+        // Seesaw pivot stand
+        const standGeo = new THREE.ConeGeometry(0.3, 0.6, 4);
+        const stand = new THREE.Mesh(standGeo, metalMat);
+        stand.position.set(-1.0, 0.3, -5.2);
+        stand.castShadow = true;
+        scene.add(stand);
+
+        // Seesaw board
+        const seesawGroup = new THREE.Group();
+        seesawGroup.position.set(-1.0, 0.6, -5.2);
+        scene.add(seesawGroup);
+
+        const boardGeo = new THREE.BoxGeometry(0.6, 0.08, 2.5);
+        const board = new THREE.Mesh(boardGeo, metalMat);
+        board.castShadow = true;
+        board.receiveShadow = true;
+        seesawGroup.add(board);
+
+        // Ball 2 (Sitting on the low end of seesaw initially, gets launched)
+        const ball2 = new THREE.Mesh(ballGeo, ballMat2);
+        ball2.castShadow = true;
+        scene.add(ball2);
+
+        const seesawTriggerTime = ball1LaunchTime + 0.9;
+
+        // --- BUILD STAGE 4: BLOCK STACK ---
+        const blockGroup = new THREE.Group();
+        blockGroup.position.set(-1.2, 0, -8.5);
+        scene.add(blockGroup);
+
+        const blockGeo = new THREE.BoxGeometry(0.4, 0.8, 0.4);
+        const blocks = [];
+        // Build a small tower/wall of blocks
+        const blockConfigs = [
+            { pos: [0, 0.4, 0], rot: 0 },
+            { pos: [0, 1.2, 0], rot: 0 },
+            { pos: [0, 2.0, 0], rot: 0 },
+            // Buttresses
+            { pos: [0.4, 0.4, 0.2], rot: 0.5 },
+            { pos: [-0.4, 0.4, -0.2], rot: -0.5 }
+        ];
+
+        blockConfigs.forEach((cfg, idx) => {
+            const mesh = new THREE.Mesh(blockGeo, blockMat);
+            mesh.position.set(...cfg.pos);
+            mesh.rotation.y = cfg.rot;
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            blockGroup.add(mesh);
+            blocks.push({
+                mesh: mesh,
+                basePos: mesh.position.clone(),
+                baseRot: mesh.rotation.clone(),
+                delay: seesawTriggerTime + 0.8 + idx * 0.05
+            });
+        });
+
+        // --- BUILD STAGE 5: FLAG & LAMP ---
+        // Lamp fixture
+        const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 3, 16);
+        const pole = new THREE.Mesh(poleGeo, metalMat);
+        pole.position.set(-1.5, 1.5, -11.5);
+        pole.castShadow = true;
+        scene.add(pole);
+
+        const bulbGeo = new THREE.SphereGeometry(0.2, 16, 16);
+        const bulbMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
+        const bulb = new THREE.Mesh(bulbGeo, bulbMat);
+        bulb.position.set(-1.5, 2.8, -11.5);
+        scene.add(bulb);
+
+        // Flag mechanism
+        const flagGroup = new THREE.Group();
+        flagGroup.position.set(-1.5, 2.5, -11.5);
+        scene.add(flagGroup);
+
+        const flagPoleGeo = new THREE.CylinderGeometry(0.03, 0.03, 1.5, 8);
+        const flagPole = new THREE.Mesh(flagPoleGeo, metalMat);
+        flagPole.rotation.z = Math.PI / 2;
+        flagPole.position.set(0.75, 0, 0);
+        flagGroup.add(flagPole);
+
+        const flagGeo = new THREE.PlaneGeometry(1.0, 0.6);
+        const flagMesh = new THREE.Mesh(flagGeo, flagMat);
+        flagMesh.position.set(1.25, -0.3, 0);
+        flagMesh.castShadow = true;
+        flagGroup.add(flagMesh);
+
+        const finalTriggerTime = blocks[0].delay + 0.4;
+
+        // --- HUD MANAGEMENT ---
+        const stages = [
+            { id: 'stage-1', start: 0.0, end: dominoCount * 0.12 + 0.2 },
+            { id: 'stage-2', start: ball1LaunchTime, end: seesawTriggerTime + 0.2 },
+            { id: 'stage-3', start: seesawTriggerTime, end: seesawTriggerTime + 0.9 },
+            { id: 'stage-4', start: blocks[0].delay, end: finalTriggerTime + 0.4 },
+            { id: 'stage-5', start: finalTriggerTime, end: DURATION }
+        ];
+
+        function updateHUD(time) {
+            stages.forEach((st, idx) => {
+                const el = document.getElementById(st.id);
+                if (time >= st.start && time < st.end) {
+                    el.className = 'stage-indicator active';
+                } else if (time >= st.end) {
+                    el.className = 'stage-indicator completed';
+                } else {
+                    el.className = 'stage-indicator';
+                }
+            });
+        }
+
+        // --- CAMERA CINEMATOGRAPHY PATHS ---
+        const camPos = new THREE.Vector3();
+        const camTarget = new THREE.Vector3();
+
+        function updateCamera(time) {
+            // Smoothly choreograph camera based on active stage
+            if (time < 2.0) {
+                // Stage 1: Focus on Dominoes curve
+                camPos.set(-4, 3, 7);
+                camTarget.set(-3.5, 0.5, 2);
+            } else if (time < 4.5) {
+                // Stage 2: Track ramp & ball drop
+                camPos.set(2, 2.5, -1);
+                camTarget.set(-0.8, 1.0, -2.0);
+            } else if (time < 6.5) {
+                // Stage 3: Seesaw action
+                camPos.set(1.5, 2.0, -4.5);
+                camTarget.set(-1.0, 0.8, -5.2);
+            } else if (time < 8.5) {
+                // Stage 4: Block collapse
+                camPos.set(-4.0, 3.0, -7.0);
+                camTarget.set(-1.2, 1.0, -8.5);
+            } else {
+                // Stage 5: Final lamp & flag
+                camPos.set(1.5, 3.0, -10.0);
+                camTarget.set(-1.5, 2.2, -11.5);
+            }
+
+            // Add subtle floating motion
+            camera.position.lerp(camPos, 0.05);
+            
+            // Look target adjustment
+            const currentLook = new THREE.Vector3();
+            camera.getWorldDirection(currentLook);
+            
+            camera.lookAt(camTarget);
+        }
+
+        // --- ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const dt = clock.getDelta();
+            loopTime += dt;
+            if (loopTime >= DURATION) {
+                loopTime = 0; // Seamless auto-reset
+            }
+
+            updateHUD(loopTime);
+            updateCamera(loopTime);
+
+            // --- STAGE 1 ANIMATION: DOMINOES ---
+            dominoes.forEach(d => {
+                if (loopTime >= d.toppleDelay) {
+                    const progress = Math.min(1, (loopTime - d.toppleDelay) / d.duration);
+                    // Ease out cubic
+                    const ease = 1 - Math.pow(1 - progress, 3);
+                    d.mesh.rotation.x = ease * (Math.PI / 2.1);
+                    // Slight sideways lean for natural look
+                    d.mesh.rotation.z = ease * 0.1;
+                } else {
+                    d.mesh.rotation.x = 0;
+                    d.mesh.rotation.z = 0;
+                }
+            });
+
+            // --- STAGE 2 ANIMATION: BALL 1 ON RAMP ---
+            if (loopTime >= ball1LaunchTime && loopTime < seesawTriggerTime + 0.2) {
+                const bProgress = Math.min(1, (loopTime - ball1LaunchTime) / 0.8);
+                const easeB = bProgress * bProgress; // Acceleration down ramp
+                
+                // Interpolate along ramp vector
+                const startP = new THREE.Vector3(-0.9, 1.1, -0.3);
+                const endP = new THREE.Vector3(-1.0, 0.65, -4.8);
+                ball1.position.lerpVectors(startP, endP, easeB);
+                
+                // Roll rotation
+                ball1.rotation.x -= dt * 10;
+                ball1.visible = true;
+            } else if (loopTime < ball1LaunchTime) {
+                ball1.position.copy(ball1StartPos);
+                ball1.visible = true;
+            } else {
+                ball1.visible = false; // Hide after impact
+            }
+
+            // --- STAGE 3 ANIMATION: SEESAW & BALL 2 ---
+            let seesawAngle = 0;
+            if (loopTime >= seesawTriggerTime) {
+                const sProgress = Math.min(1, (loopTime - seesawTriggerTime) / 0.4);
+                // Seesaw rotates down on impact side (-z end), launching +z end up
+                seesawAngle = Math.sin(sProgress * Math.PI) * 0.4 + (sProgress >= 0.5 ? 0 : sProgress * 0.8);
+            }
+            seesawGroup.rotation.x = seesawAngle;
+
+            // Ball 2 physics (sitting on launcher end, flies off)
+            const ball2LaunchStart = seesawTriggerTime + 0.2;
+            if (loopTime >= ball2LaunchStart && loopTime < blockGroup.delay + 0.2) {
+                const flightTime = loopTime - ball2LaunchStart;
+                // Parabolic projectile motion
+                const bx = -1.2;
+                const by = 0.7 + flightTime * 3.5 - 4.9 * flightTime * flightTime; // gravity
+                const bz = -5.2 - flightTime * 4.5; // move towards blocks
+                ball2.position.set(bx, Math.max(0.25, by), bz);
+                ball2.visible = true;
+            } else if (loopTime < ball2LaunchStart) {
+                // Resting on seesaw high end
+                ball2.position.set(-1.0, 0.85, -5.8);
+                ball2.visible = true;
+            } else {
+                ball2.visible = false;
+            }
+
+            // --- STAGE 4 ANIMATION: BLOCK STACK ---
+            blocks.forEach(b => {
+                if (loopTime >= b.delay) {
+                    const bProg = Math.min(1, (loopTime - b.delay) / 0.4);
+                    const bEase = 1 - Math.pow(1 - bProg, 2);
+                    b.mesh.position.y = b.basePos.y - bEase * 0.5;
+                    b.mesh.rotation.z = b.baseRot.z + bEase * 1.5 * (b.basePos.x >= 0 ? 1 : -1);
+                    b.mesh.rotation.x = b.baseRot.x + bEase * 1.0;
+                } else {
+                    b.mesh.position.copy(b.basePos);
+                    b.mesh.rotation.copy(b.baseRot);
+                }
+            });
+
+            // --- STAGE 5 ANIMATION: FLAG & LAMP ---
+            if (loopTime >= finalTriggerTime) {
+                const fProg = Math.min(1, (loopTime - finalTriggerTime) / 0.5);
+                const fEase = 1 - Math.cos(fProg * Math.PI * 0.5);
+                
+                // Raise flag
+                flagGroup.position.y = 2.5 + fEase * 0.8;
+                flagGroup.rotation.y = fEase * Math.PI * 2;
+
+                // Turn on lamp
+                bulb.material.color.setHex(0xffaa00);
+                pointLight.intensity = fEase * 3.0;
+            } else {
+                flagGroup.position.set(-1.5, 2.5, -11.5);
+                flagGroup.rotation.set(0, 0, 0);
+                bulb.material.color.setHex(0x222222);
+                pointLight.intensity = 0;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- RESIZE HANDLER ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start loop immediately without user input
+        animate();
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rube Goldberg — 5 Stages</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#0b0e14;font-family:system-ui,sans-serif}
+canvas{display:block}
+#hud{position:fixed;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:5}
+.st{background:#1a2230cc;color:#8fa0b8;border:1px solid #33415a;border-radius:10px;padding:6px 10px;font-size:12px;font-weight:700;transition:all .25s;white-space:nowrap}
+.st.on{background:#ffd54a;color:#111;border-color:#ffd54a;box-shadow:0 0 14px #ffd54a}
+.st.done{background:#2e7d32;color:#fff;border-color:#2e7d32}
+#cap{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);color:#fff;background:#000a;padding:7px 16px;border-radius:20px;font-size:13px;z-index:5}
+#bar{position:fixed;bottom:0;left:0;height:4px;background:#ffd54a;width:0;z-index:6}
+</style>
+</head>
+<body>
+<div id="hud">
+<div class="st" id="s1">1 Dominoes</div><div class="st" id="s2">2 Ramp</div><div class="st" id="s3">3 Lever</div><div class="st" id="s4">4 Blocks</div><div class="st" id="s5">5 Lamp+Flag</div>
+</div>
+<div id="cap">…</div><div id="bar"></div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+const T=10.5, N=14, D0=0.3, DD=0.24;
+const T_BALL=D0+N*DD+0.1, T_LEV=T_BALL+1.5, T_SHOT=T_LEV+0.25, T_HIT=T_SHOT+1.15, T_LAMP=T_HIT+1.6;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)), S=(t,a,b)=>{const x=clamp((t-a)/(b-a),0,1);return x*x*(3-2*x);};
+const rnd=new THREE.Scene(); rnd.background=new THREE.Color(0x0b0e14); rnd.fog=new THREE.Fog(0x0b0e14,18,40);
+const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,100);
+const ren=new THREE.WebGLRenderer({antialias:true}); ren.setSize(innerWidth,innerHeight);
+ren.shadowMap.enabled=true; ren.shadowMap.type=THREE.PCFSoftShadowMap; document.body.appendChild(ren.domElement);
+rnd.add(new THREE.AmbientLight(0x8899bb,0.55));
+const sun=new THREE.DirectionalLight(0xfff2d9,1.6); sun.position.set(-4,10,6); sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048); sun.shadow.camera.left=-12; sun.shadow.camera.right=12;
+sun.shadow.camera.top=12; sun.shadow.camera.bottom=-6; rnd.add(sun);
+const gnd=new THREE.Mesh(new THREE.PlaneGeometry(60,30),new THREE.MeshStandardMaterial({color:0x182233,roughness:1}));
+gnd.rotation.x=-Math.PI/2; gnd.receiveShadow=true; rnd.add(gnd);
+const M=(c,e=0,r=0.6)=>new THREE.MeshStandardMaterial({color:c,roughness:r,emissive:e,emissiveIntensity:0});
+function box(w,h,d,c){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),M(c));m.castShadow=m.receiveShadow=true;return m;}
+function ball(r,c){const m=new THREE.Mesh(new THREE.SphereGeometry(r,24,18),new THREE.MeshStandardMaterial({color:c,roughness:0.3}));m.castShadow=true;return m;}
+// dominoes on a curve
+const doms=[]; const dg=new THREE.BoxGeometry(0.14,0.9,0.42); dg.translate(0,0.45,0);
+for(let i=0;i<N;i++){const x=-9+i*0.46, z=Math.sin(i*0.55)*0.9;
+const m=new THREE.Mesh(dg,new THREE.MeshStandardMaterial({color:i%2?0xe74c3c:0xecf0f1,roughness:0.5}));
+m.position.set(x,0.9,z); m.rotation.y=-Math.cos(i*0.55)*0.35; m.castShadow=m.receiveShadow=true; rnd.add(m);
+const tbl=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.9,1.6),M(0x24344d)); tbl.position.set(x,-0.45,z); tbl.receiveShadow=true; rnd.add(tbl);
+doms.push(m);}
+// ramp A->B
+const A=new THREE.Vector3(-2.2,3.1,0), B=new THREE.Vector3(0.4,1.15,0);
+const rampLen=A.distanceTo(B), ramp=box(rampLen,0.12,0.8,0x8e6cc9);
+ramp.position.copy(A).lerp(B,0.5); ramp.rotation.z=Math.atan2(A.y-B.y,A.x-B.x)*-1; ramp.rotation.z=Math.atan2(B.y-A.y,B.x-A.x);
+rnd.add(ramp);
+const tow=box(0.3,3.1,0.8,0x3a4a63); tow.position.set(A.x-0.15,1.55,0); rnd.add(tow);
+// lever
+const piv=new THREE.Group(); piv.position.set(2.3,0.75,0); rnd.add(piv);
+const plank=box(2.6,0.12,0.7,0x27ae60); plank.position.y=0.06; piv.add(plank);
+const ful=box(0.4,0.75,0.6,0x95a5a6); ful.position.set(2.3,0.37,0); rnd.add(ful);
+// balls
+const b1=ball(0.22,0xffd54a), b2=ball(0.2,0x40c4ff); rnd.add(b1,b2);
+// block tower
+const blks=[]; const bc=[0xe67e22,0x9b59b6,0x1abc9c,0xe91e63,0x3498db,0xf1c40f];
+for(let j=0;j<6;j++){const m=box(0.55,0.55,0.55,bc[j]); const row=j<3?0:1, k=j%3;
+m.userData={x0:4.9+k*0.58,y0:0.28+row*0.57,d:j*0.14}; m.position.set(m.userData.x0,m.userData.y0,0); rnd.add(m); blks.push(m);}
+const shelf=box(2.4,0.15,1,0x5d6d7e); shelf.position.set(5.4,0.07,0); rnd.add(shelf);
+// lamp + flag
+const pole=box(0.15,3,0.15,0x7f8c8d); pole.position.set(7.6,1.5,0); rnd.add(pole);
+const shade=new THREE.Mesh(new THREE.ConeGeometry(0.55,0.5,20,1,true),new THREE.MeshStandardMaterial({color:0x34495e,side:THREE.DoubleSide}));
+shade.position.set(7.6,3.1,0); rnd.add(shade);
+const bulb=new THREE.Mesh(new THREE.SphereGeometry(0.24,20,14),new THREE.MeshStandardMaterial({color:0xfff9c4,emissive:0xffeb3b,emissiveIntensity:0}));
+bulb.position.set(7.6,2.85,0); rnd.add(bulb);
+const lamp=new THREE.PointLight(0xffd54a,0,12); lamp.position.set(7.6,2.8,0); rnd.add(lamp);
+const fpole=box(0.08,2.4,0.08,0xbdc3c7); fpole.position.set(8.6,1.2,-0.8); rnd.add(fpole);
+const flag=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.55),new THREE.MeshStandardMaterial({color:0x2ecc71,side:THREE.DoubleSide,emissive:0x2ecc71,emissiveIntensity:0.25}));
+rnd.add(flag);
+const glow=new THREE.Mesh(new THREE.SphereGeometry(0.5,16,12),new THREE.MeshBasicMaterial({color:0xffd54a,transparent:true,opacity:0}));
+glow.position.copy(bulb.position); rnd.add(glow);
+const els=[1,2,3,4,5].map(i=>document.getElementById('s'+i)), cap=document.getElementById('cap'), bar=document.getElementById('bar');
+const caps=['Stage 1 — dominoes toppling in sequence','Stage 2 — last domino releases ball down ramp','Stage 3 — ball slams lever, launching second ball','Stage 4 — flying ball smashes the block tower','Stage 5 — lamp lights & flag rises','Resetting…'];
+const F=[new THREE.Vector3(-6.5,1.2,0),new THREE.Vector3(-0.9,1.8,0),new THREE.Vector3(2.3,1,0),new THREE.Vector3(5.2,1,0),new THREE.Vector3(7.8,1.8,-0.3)];
+const FK=[0,T_BALL,T_LEV,T_HIT,T_LAMP,T+0.01];
+function focus(t){for(let k=0;k<FK.length-1;k++){if(t<FK[k+1]){const u=(t-FK[k])/(FK[k+1]-FK[k]);return F[k].clone().lerp(F[Math.min(k+1,4)],u);}}return F[4].clone();}
+const V=(a,b,u)=>a.clone().lerp(b,u);
+function pose(t){
+doms.forEach((m,i)=>{const s=D0+i*DD; m.rotation.z=-(S(t,s,s+0.28)*1.25);});
+// ball1: wait at top, roll down ramp, drop onto lever left end
+const L0=new THREE.Vector3(2.3-1.15,1.0,0);
+let p1; if(t<T_BALL)p1=A.clone().add(new THREE.Vector3(0,0.28,0));
+else if(t<T_LEV){const u=(t-T_BALL)/(T_LEV-T_BALL), e=u*u; p1=V(A,B,e); p1.y+=0.28; if(u>0.85){const w=(u-0.85)/0.15; p1.lerpVectors(V(A,B,1).add(new THREE.Vector3(0,0.28,0)),L0,w);}}
+else p1=L0.clone(); b1.position.copy(p1); b1.rotation.z-= (t<T_BALL||t>T_LEV+0.4)?0:0.25;
+// lever slam
+piv.rotation.z=t<T_LEV?0.16:0.16-(S(t,T_LEV,T_LEV+0.35)*0.5);
+// ball2: sits on right end, then projectile to blocks
+const R0=new THREE.Vector3(2.3+1.05,1.25,0);
+if(t<T_SHOT){b2.position.copy(R0); b2.position.y+=piv.rotation.z*-1.0;}
+else{const u=t-T_SHOT, v0=new THREE.Vector3(2.6,3.2,0);
+b2.position.set(R0.x+v0.x*u, R0.y+v0.y*u-4.9*u*u, 0); b2.rotation.x+=0.3;}
+// blocks topple after hit
+blks.forEach((m,j)=>{const u=S(t,T_HIT+m.userData.d,T_HIT+m.userData.d+0.7);
+m.rotation.z=u*1.35; m.rotation.x=u*0.4*(j%2?1:-1); m.position.set(m.userData.x0+u*(0.7+j*0.12),Math.max(0.28,m.userData.y0-u*u*0.9),u*0.4);});
+// lamp + flag
+const on=S(t,T_LAMP,T_LAMP+0.4); lamp.intensity=on*60; bulb.material.emissiveIntensity=on*2.5; glow.material.opacity=on*0.25;
+flag.position.set(8.6+0.5,0.6+S(t,T_LAMP,T_LAMP+1.2)*1.7,-0.8);
+flag.material.emissiveIntensity=on*0.6;
+return on;}
+addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();ren.setSize(innerWidth,innerHeight);});
+let prev=performance.now()/1000;
+function loop(){requestAnimationFrame(loop);
+const now=performance.now()/1000; const t=(now%(T+0.6));
+const on=pose(t);
+const f=focus(Math.min(t,T)); cam.position.set(f.x+1.2,3.4,f.z+7.2); cam.lookAt(f.x,f.y-0.3,f.z);
+const th=[D0,T_BALL,T_LEV,T_HIT,T_LAMP]; let stage=t>T?5:th.filter(x=>t>=x).length; stage=Math.max(stage,1);
+els.forEach((e,i)=>{e.className='st'+(t>th[i]?(i<stage-1||t>T_LAMP&&i===4?' done':' on'):'');});
+const ci=t>T?5:Math.min(4,th.filter(x=>t>=x).length-1<0?0:th.filter(x=>t>=x).length-1);
+cap.textContent=(t>T?caps[5]:caps[Math.max(0,ci)])+'  •  t='+t.toFixed(1)+'s / '+T+'s loop';
+bar.style.width=(t/T*100)+'%';
+ren.render(rnd,cam);}
+loop();
+</script>
+</body>
+</html>

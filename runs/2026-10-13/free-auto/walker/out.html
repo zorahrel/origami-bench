@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parkour Combat 3D</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #050508;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #ui {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #ffffff;
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            text-shadow: 0 0 10px rgba(0, 242, 255, 0.7), 0 0 20px rgba(0, 242, 255, 0.5);
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            background: rgba(5, 5, 8, 0.6);
+            padding: 10px 30px;
+            border-radius: 30px;
+            border: 1px solid rgba(0, 242, 255, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">INITIALIZING</div>
+    <script type="module">
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+        // --- SCENE, CAMERA, RENDERER ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0b0b12);
+        scene.fog = new THREE.FogExp2(0x0b0b12, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0x222233, 1.5);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
+        dirLight.position.set(20, 40, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 100;
+        const d = 30;
+        dirLight.shadow.camera.left = -d;
+        dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d;
+        dirLight.shadow.camera.bottom = -d;
+        dirLight.shadow.bias = -0.0005;
+        scene.add(dirLight);
+
+        const pointLight = new THREE.PointLight(0x00f2ff, 3, 50);
+        pointLight.position.set(-10, 10, -5);
+        scene.add(pointLight);
+
+        const pointLight2 = new THREE.PointLight(0xff0055, 3, 50);
+        pointLight2.position.set(10, 5, 10);
+        scene.add(pointLight2);
+
+        // --- ENVIRONMENT ---
+        // Floor
+        const floorGeo = new THREE.PlaneGeometry(100, 100, 50, 50);
+        const floorMat = new THREE.MeshStandardMaterial({ 
+            color: 0x111118, 
+            roughness: 0.8, 
+            metalness: 0.2,
+            flatShading: true
+        });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // Grid lines on floor for cyberpunk aesthetic
+        const gridHelper = new THREE.GridHelper(100, 50, 0x00f2ff, 0x222233);
+        gridHelper.position.y = 0.01;
+        scene.add(gridHelper);
+
+        // Wall for Wall-run (Striped)
+        const wallGroup = new THREE.Group();
+        const wallHeight = 12;
+        const wallWidth = 35;
+        
+        // Base wall
+        const wallGeo = new THREE.BoxGeometry(wallWidth, wallHeight, 1);
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x1a1a24, roughness: 0.5 });
+        const baseWall = new THREE.Mesh(wallGeo, wallMat);
+        baseWall.position.set(0, wallHeight/2, -15);
+        baseWall.castShadow = true;
+        baseWall.receiveShadow = true;
+        wallGroup.add(baseWall);
+
+        // Stripes on wall
+        const stripeMat1 = new THREE.MeshStandardMaterial({ color: 0x00f2ff, emissive: 0x005566, roughness: 0.3 });
+        const stripeMat2 = new THREE.MeshStandardMaterial({ color: 0xff0055, emissive: 0x550022, roughness: 0.3 });
+        
+        for(let i = -16; i <= 16; i += 4) {
+            const stripeGeo = new THREE.BoxGeometry(0.5, wallHeight, 1.1);
+            const stripe = new THREE.Mesh(stripeGeo, i % 8 === 0 ? stripeMat1 : stripeMat2);
+            stripe.position.set(i, wallHeight/2, -15);
+            wallGroup.add(stripe);
+        }
+        scene.add(wallGroup);
+
+        // --- CHARACTER CONSTRUCTION ---
+        const charMaterials = {
+            skin: new THREE.MeshStandardMaterial({ color: 0xffdbac, roughness: 0.6 }),
+            suit: new THREE.MeshStandardMaterial({ color: 0x15151c, roughness: 0.4, metalness: 0.3 }),
+            accent: new THREE.MeshStandardMaterial({ color: 0x00f2ff, emissive: 0x004455, roughness: 0.2 }),
+            joint: new THREE.MeshStandardMaterial({ color: 0x333344, roughness: 0.5, metalness: 0.8 }),
+            visor: new THREE.MeshStandardMaterial({ color: 0xff0055, emissive: 0xff0055, roughness: 0.1 })
+        };
+
+        const character = new THREE.Group();
+        scene.add(character);
+
+        // Helper to create body parts with shadows
+        function createPart(geo, mat, castShadow = true) {
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.castShadow = castShadow;
+            mesh.receiveShadow = true;
+            return mesh;
+        }
+
+        // Torso Hierarchy
+        const hips = new THREE.Group();
+        character.add(hips);
+
+        const hipMesh = createPart(new THREE.BoxGeometry(0.8, 0.4, 0.5), charMaterials.suit);
+        hipMesh.position.y = 0.2;
+        hips.add(hipMesh);
+
+        const spine = new THREE.Group();
+        spine.position.y = 0.4;
+        hips.add(spine);
+
+        const spineMesh = createPart(new THREE.BoxGeometry(0.7, 0.8, 0.4), charMaterials.suit);
+        spineMesh.position.y = 0.4;
+        spine.add(spineMesh);
+
+        // Chest / Shoulders
+        const chest = new THREE.Group();
+        chest.position.y = 0.8;
+        spine.add(chest);
+
+        const chestMesh = createPart(new THREE.BoxGeometry(1.0, 0.7, 0.5), charMaterials.suit);
+        chestMesh.position.y = 0.35;
+        chest.add(chestMesh);
+
+        const chestAcc = createPart(new THREE.BoxGeometry(0.6, 0.5, 0.52), charMaterials.accent);
+        chestAcc.position.y = 0.35;
+        chest.add(chestAcc);
+
+        // Head
+        const neck = new THREE.Group();
+        neck.position.y = 0.7;
+        chest.add(neck);
+
+        const head = new THREE.Group();
+        neck.add(head);
+
+        const headMesh = createPart(new THREE.BoxGeometry(0.5, 0.6, 0.5), charMaterials.skin);
+        headMesh.position.y = 0.3;
+        head.add(headMesh);
+
+        const visorMesh = createPart(new THREE.BoxGeometry(0.52, 0.2, 0.25), charMaterials.visor);
+        visorMesh.position.set(0, 0.35, 0.15);
+        head.add(visorMesh);
+
+        // Arms Setup
+        function createArm(isLeft) {
+            const side = isLeft ? 1 : -1;
+            
+            const shoulder = new THREE.Group();
+            shoulder.position.set(0.6 * side, 0.6, 0);
+            chest.add(shoulder);
+
+            const shoulderBall = createPart(new THREE.SphereGeometry(0.2, 16, 16), charMaterials.joint);
+            shoulder.add(shoulderBall);
+
+            const upperArm = new THREE.Group();
+            shoulder.add(upperArm);
+
+            const upperArmMesh = createPart(new THREE.BoxGeometry(0.35, 0.7, 0.35), charMaterials.suit);
+            upperArmMesh.position.y = -0.35;
+            upperArm.add(upperArmMesh);
+
+            const elbow = new THREE.Group();
+            elbow.position.y = -0.7;
+            upperArm.add(elbow);
+
+            const elbowBall = createPart(new THREE.SphereGeometry(0.15, 16, 16), charMaterials.joint);
+            elbow.add(elbowBall);
+
+            const lowerArm = new THREE.Group();
+            elbow.add(lowerArm);
+
+            const lowerArmMesh = createPart(new THREE.BoxGeometry(0.3, 0.6, 0.3), charMaterials.suit);
+            lowerArmMesh.position.y = -0.3;
+            lowerArm.add(lowerArmMesh);
+
+            const hand = new THREE.Group();
+            hand.position.y = -0.65;
+            lowerArm.add(hand);
+
+            const handMesh = createPart(new THREE.BoxGeometry(0.25, 0.3, 0.2), charMaterials.skin);
+            handMesh.position.y = -0.15;
+            hand.add(handMesh);
+
+            return { shoulder, upperArm, elbow, lowerArm, hand };
+        }
+
+        const leftArm = createArm(true);
+        const rightArm = createArm(false);
+
+        // Legs Setup
+        function createLeg(isLeft) {
+            const side = isLeft ? 1 : -1;
+
+            const hipJoint = new THREE.Group();
+            hipJoint.position.set(0.25 * side, 0, 0);
+            hips.add(hipJoint);
+
+            const hipBall = createPart(new THREE.SphereGeometry(0.22, 16, 16), charMaterials.joint);
+            hipJoint.add(hipBall);
+
+            const upperLeg = new THREE.Group();
+            hipJoint.add(upperLeg);
+
+            const upperLegMesh = createPart(new THREE.BoxGeometry(0.4, 0.9, 0.4), charMaterials.suit);
+            upperLegMesh.position.y = -0.45;
+            upperLeg.add(upperLegMesh);
+
+            const knee = new THREE.Group();
+            knee.position.y = -0.9;
+            upperLeg.add(knee);
+
+            const kneeBall = createPart(new THREE.SphereGeometry(0.18, 16, 16), charMaterials.joint);
+            knee.add(kneeBall);
+
+            const lowerLeg = new THREE.Group();
+            knee.add(lowerLeg);
+
+            const lowerLegMesh = createPart(new THREE.BoxGeometry(0.35, 0.8, 0.35), charMaterials.suit);
+            lowerLegMesh.position.y = -0.4;
+            lowerLeg.add(lowerLegMesh);
+
+            const foot = new THREE.Group();
+            foot.position.y = -0.85;
+            lowerLeg.add(foot);
+
+            const footMesh = createPart(new THREE.BoxGeometry(0.35, 0.2, 0.6), charMaterials.suit);
+            footMesh.position.set(0, -0.1, 0.15);
+            foot.add(footMesh);
+
+            return { hipJoint, upperLeg, knee, lowerLeg, foot };
+        }
+
+        const leftLeg = createLeg(true);
+        const rightLeg = createLeg(false);
+
+
+        // --- ANIMATION TIMELINE ENGINE ---
+        // Total sequence duration: ~10 seconds, looped smoothly
+        const DURATION = 10.0;
+        let currentTime = 0;
+        
+        const uiText = document.getElementById('ui');
+        let currentPhaseName = "";
+
+        function setPhase(name) {
+            if (currentPhaseName !== name) {
+                currentPhaseName = name;
+                uiText.innerText = name;
+            }
+        }
+
+        // Utility Math functions
+        function lerp(a, b, t) { return a + (b - a) * t; }
+        function clamp(val, min, max) { return Math.max(min, Math.min(max, val)); }
+        function smoothStep(t) { return t * t * (3 - 2 * t); }
+        function smootherStep(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+
+        // Reset pose
+        function resetPose() {
+            character.position.set(0, 0, 0);
+            character.rotation.set(0, 0, 0);
+            hips.position.set(0, 0, 0);
+            hips.rotation.set(0, 0, 0);
+            spine.rotation.set(0, 0, 0);
+            chest.rotation.set(0, 0, 0);
+            head.rotation.set(0, 0, 0);
+            
+            // Arms
+            leftArm.shoulder.rotation.set(0,0,0);
+            leftArm.upperArm.rotation.set(0,0,0);
+            leftArm.lowerArm.rotation.set(0,0,0);
+            rightArm.shoulder.rotation.set(0,0,0);
+            rightArm.upperArm.rotation.set(0,0,0);
+            rightArm.lowerArm.rotation.set(0,0,0);
+
+            // Legs
+            leftLeg.upperLeg.rotation.set(0,0,0);
+            leftLeg.knee.rotation.set(0,0,0);
+            leftLeg.foot.rotation.set(0,0,0);
+            rightLeg.upperLeg.rotation.set(0,0,0);
+            rightLeg.knee.rotation.set(0,0,0);
+            rightLeg.foot.rotation.set(0,0,0);
+        }
+
+        // Camera target tracking variables for smooth lag
+        const camTargetPos = new THREE.Vector3();
+        const camLookAtPos = new THREE.Vector3();
+
+        function animate(timestamp, deltaTime) {
+            currentTime += deltaTime;
+            if (currentTime > DURATION) currentTime -= DURATION;
+
+            // Normalize time 0 -> 1
+            const t = currentTime / DURATION;
+
+            // Reset base transforms each frame before applying current phase
+            resetPose();
+
+            let phaseName = "";
+            let camOffset = new THREE.Vector3(0, 3, 7);
+            let camLookOffset = new THREE.Vector3(0, 1, 0);
+
+            // PHASES BREAKDOWN:
+            // 0.00 - 0.25: RUNNING TO WALL (~2.5s)
+            // 0.25 - 0.45: WALL RUN (~2.0s)
+            // 0.45 - 0.55: FLIP OFF WALL (~1.0s)
+            // 0.55 - 0.65: CROUCH LANDING (~1.0s)
+            // 0.65 - 0.75: PUNCH COMBA 1 (~1.0s)
+            // 0.75 - 0.85: KICK COMBO 2 (~1.0s)
+            // 0.85 - 0.95: SPIN KICK COMBO 3 (~1.0s)
+            // 0.95 - 1.00: RESET / IDLE (~0.5s)
+
+            if (t < 0.25) {
+                // --- PHASE 1: RUNNING TO WALL ---
+                phaseName = "APPROACH & RUN";
+                const p = t / 0.25;
+                
+                // Movement: from z = 10 to z = -14
+                const zPos = lerp(12, -13.5, p);
+                character.position.set(0, 0.95, zPos);
+                
+                // Running cycle
+                const runCycle = p * Math.PI * 8;
+                const legSwing = Math.sin(runCycle) * 0.9;
+                
+                leftLeg.upperLeg.rotation.x = legSwing;
+                leftLeg.knee.rotation.x = Math.max(0, -Math.sin(runCycle) * 1.2);
+                
+                rightLeg.upperLeg.rotation.x = -legSwing;
+                rightLeg.knee.rotation.x = Math.max(0, -Math.sin(runCycle + Math.PI) * 1.2);
+
+                leftArm.upperArm.rotation.x = -legSwing * 0.8;
+                leftArm.lowerArm.rotation.x = -0.5;
+                rightArm.upperArm.rotation.x = legSwing * 0.8;
+                rightArm.lowerArm.rotation.x = -0.5;
+
+                spine.rotation.x = 0.2; // leaning forward
+                
+                camOffset.set(-3, 3, 6);
+                camLookOffset.set(0, 1, zPos);
+
+            } else if (t < 0.45) {
+                // --- PHASE 2: WALL RUN ---
+                phaseName = "WALL RUN";
+                const p = (t - 0.25) / 0.20;
+                
+                // Move along the wall from x = 0 to x = 10 at z = -14.5
+                const xPos = lerp(0, 12, p);
+                character.position.set(xPos, 2.5, -14.3);
+                
+                // Body tilted sideways onto the wall (Z rotation)
+                character.rotation.z = Math.PI / 2.5;
+                character.rotation.y = 0;
+                character.rotation.x = 0.2;
+
+                // Wall run leg/arm pumping
+                const runCycle = p * Math.PI * 6;
+                leftLeg.upperLeg.rotation.z = Math.sin(runCycle) * 0.6;
+                rightLeg.upperLeg.rotation.z = -Math.sin(runCycle) * 0.6;
+                leftLeg.knee.rotation.x = 0.5;
+                rightLeg.knee.rotation.x = 0.5;
+
+                leftArm.upperArm.rotation.z = -0.5;
+                rightArm.upperArm.rotation.z = -0.5;
+
+                camOffset.set(0, -2, 8);
+                camLookOffset.set(xPos, 2, -14.3);
+
+            } else if (t < 0.55) {
+                // --- PHASE 3: FLIP OFF WALL ---
+                phaseName = "WALL FLIP";
+                const p = (t - 0.45) / 0.10;
+                
+                // Jump away from wall: x from 12 to 5, z from -14.3 to -5, y parabole
+                const xPos = lerp(12, 4, smootherStep(p));
+                const zPos = lerp(-14.3, -4, smootherStep(p));
+                const yPos = 2.5 + Math.sin(p * Math.PI) * 3.5;
+                
+                character.position.set(xPos, yPos, zPos);
+                
+                // Full front flip rotation (X axis)
+                character.rotation.z = lerp(Math.PI / 2.5, 0, p);
+                character.rotation.y = -Math.PI / 4;
+                character.rotation.x = p * Math.PI * 2; // Full flip!
+
+                // Tuck in flip
+                leftLeg.upperLeg.rotation.x = -1.2;
+                leftLeg.knee.rotation.x = 2.0;
+                rightLeg.upperLeg.rotation.x = -1.2;
+                rightLeg.knee.rotation.x = 2.0;
+
+                camOffset.set(-4, 4, 7);
+                camLookOffset.set(xPos, yPos, zPos);
+
+            } else if (t < 0.65) {
+                // --- PHASE 4: CROUCH LANDING ---
+                phaseName = "IMPACT LANDING";
+                const p = (t - 0.55) / 0.10;
+                
+                const xPos = lerp(4, 2, p);
+                const zPos = lerp(-4, -2, p);
+                const yPos = lerp(4, 0.95, smootherStep(p));
+                
+                character.position.set(xPos, yPos, zPos);
+                character.rotation.y = -Math.PI / 4;
+
+                // Deep crouch absorption
+                const crouchAmount = lerp(1.5, 0.3, smootherStep(p));
+                hips.position.y = -crouchAmount;
+                
+                leftLeg.upperLeg.rotation.x = 1.2;
+                leftLeg.knee.rotation.x = -2.2;
+                leftLeg.foot.rotation.x = -0.5;
+
+                rightLeg.upperLeg.rotation.x = 0.8;
+                rightLeg.knee.rotation.x = -1.8;
+                rightLeg.foot.rotation.x = -0.3;
+
+                spine.rotation.x = 0.5;
+                leftArm.shoulder.rotation.z = 0.5;
+                rightArm.shoulder.rotation.z = -0.5;
+
+                camOffset.set(5, 2, 5);
+                camLookOffset.set(xPos, 1, zPos);
+
+            } else if (t < 0.75) {
+                // --- PHASE 5: COMBO HIT 1 (PUNCH) ---
+                phaseName = "COMBO: PUNCH";
+                const p = (t - 0.65) / 0.10;
+                
+                character.position.set(2, 0.95, -2);
+                character.rotation.y = -Math.PI / 3;
+
+                // Punch strike punch at p = 0.5
+                const punchExt = p < 0.4 ? smootherStep(p / 0.4) : smootherStep(1.0 - (p - 0.4) / 0.6);
+                
+                rightArm.shoulder.rotation.x = -1.5;
+                rightArm.upperArm.rotation.y = -0.5;
+                rightArm.lowerArm.rotation.y = -punchExt * 2.0; // extending elbow fast
+                
+                spine.rotation.y = punchExt * 0.8;
+                chest.rotation.y = punchExt * 0.4;
+
+                // Stable stance legs
+                leftLeg.upperLeg.rotation.z = 0.2;
+                rightLeg.upperLeg.rotation.z = -0.2;
+                leftLeg.upperLeg.rotation.x = -0.2;
+                rightLeg.rightLeg_x = 0.3;
+
+                camOffset.set(-4, 2.5, 5);
+                camLookOffset.set(2, 1, -2);
+
+            } else if (t < 0.85) {
+                // --- PHASE 6: COMBO HIT 2 (KICK) ---
+                phaseName = "COMBO: KICK";
+                const p = (t - 0.75) / 0.10;
+                
+                character.position.set(2, 0.95, -2);
+                character.rotation.y = -Math.PI / 3;
+
+                const kickExt = p < 0.3 ? smootherStep(p / 0.3) : smootherStep(1.0 - (p - 0.3) / 0.7);
+
+                // High front/side snap kick
+                leftLeg.upperLeg.rotation.x = -1.6 * kickExt;
+                leftLeg.upperLeg.rotation.z = 0.5 * kickExt;
+                leftLeg.knee.rotation.x = 1.8 * kickExt;
+
+                rightLeg.upperLeg.rotation.x = 0.2; // support leg
+
+                spine.rotation.x = -0.3 * kickExt;
+                leftArm.shoulder.rotation.x = 0.5;
+                rightArm.shoulder.rotation.x = 0.5;
+
+                camOffset.set(4, 2, 5);
+                camLookOffset.set(2, 1, -2);
+
+            } else if (t < 0.95) {
+                // --- PHASE 7: COMBO HIT 3 (SPIN KICK) ---
+                phaseName = "COMBO: SPIN KICK";
+                const p = (t - 0.85) / 0.10;
+                
+                character.position.set(2, 0.95, -2);
+                
+                // Full 360 spin rotation
+                const spinRot = -Math.PI / 3 - p * Math.PI * 2;
+                character.rotation.y = spinRot;
+
+                // Spin kick leg extension in middle of rotation
+                const spinKickExt = Math.sin(p * Math.PI);
+                rightLeg.upperLeg.rotation.z = -1.5 * spinKickExt;
+                rightLeg.upperLeg.rotation.x = -0.5 * spinKickExt;
+                rightLeg.knee.rotation.x = 0.5 * spinKickExt;
+
+                spine.rotation.z = -0.5 * spinKickExt;
+
+                camOffset.set(0, 3, 6);
+                camLookOffset.set(2, 1, -2);
+
+            } else {
+                // --- PHASE 8: RESET / READY STANCE ---
+                phaseName = "READY STANCE";
+                const p = (t - 0.95) / 0.05;
+                
+                const zPos = lerp(-2, 12, smootherStep(p));
+                character.position.set(0, 0.95, zPos);
+                character.rotation.y = 0;
+
+                // Guard stance pose
+                leftArm.shoulder.rotation.x = -0.8;
+                leftArm.upperArm.rotation.y = -0.5;
+                leftArm.lowerArm.rotation.x = -1.5;
+
+                rightArm.shoulder.rotation.x = -0.8;
+                rightArm.upperArm.rotation.y = 0.5;
+                rightArm.lowerArm.rotation.x = -1.5;
+
+                leftLeg.upperLeg.rotation.x = -0.2;
+                rightLeg.upperLeg.rotation.x = 0.2;
+
+                camOffset.set(0, 3, 7);
+                camLookOffset.set(0, 1, zPos);
+            }
+
+            setPhase(phaseName);
+
+            // --- SMOOTH CAMERA LAG ---
+            const targetIdealPos = character.position.clone().add(camOffset);
+            camera.position.lerp(targetIdealPos, 0.1);
+
+            const targetIdealLook = character.position.clone().add(camLookOffset);
+            camLookAtPos.lerp(targetIdealLook, 0.15);
+            camera.lookAt(camLookAtPos);
+
+            // Dynamic point light following character loosely
+            pointLight.position.set(character.position.x - 4, character.position.y + 3, character.position.z + 2);
+        }
+
+        // --- CLOCK & LOOP ---
+        const clock = new THREE.Clock();
+
+        function loop() {
+            requestAnimationFrame(loop);
+            const deltaTime = clock.getDelta();
+            const timestamp = clock.getElapsedTime();
+            
+            animate(timestamp, Math.min(deltaTime, 0.1)); // Cap delta to avoid huge jumps
+            
+            renderer.render(scene, camera);
+        }
+
+        // --- WINDOW RESIZE ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start loop immediately
+        loop();
+
+    </script>
+</body>
+</html>

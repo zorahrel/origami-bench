@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Rube Goldberg</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#bfd4e0;font-family:system-ui,sans-serif}
+canvas{display:block}
+#hud{position:fixed;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+#hud div{padding:8px 14px;border-radius:20px;background:rgba(30,40,50,.55);color:#a9bac8;font-size:14px;transition:.25s;white-space:nowrap}
+#hud div.on{background:#ffb703;color:#222;box-shadow:0 0 16px #ffb703;transform:scale(1.08)}
+#hud b{margin-right:6px}
+</style></head><body><div id="hud"></div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+const names=['Dominoes','Ball & ramp','Seesaw','Block tower','Lamp'];
+const chips=names.map((n,i)=>{const d=document.createElement('div');d.innerHTML=`<b>${i+1}</b>${n}`;document.getElementById('hud').appendChild(d);return d});
+const lit=i=>chips[i].classList.add('on');
+const R=new THREE.WebGLRenderer({antialias:true});
+R.setPixelRatio(Math.min(devicePixelRatio,2));R.shadowMap.enabled=true;R.shadowMap.type=THREE.PCFSoftShadowMap;
+document.body.appendChild(R.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color(0xbfd4e0);scene.fog=new THREE.Fog(0xbfd4e0,35,80);
+const cam=new THREE.PerspectiveCamera(42,1,.1,200);
+scene.add(new THREE.HemisphereLight(0xffffff,0x8a8070,1));
+const sun=new THREE.DirectionalLight(0xfff2dd,2.2);sun.position.set(4,16,12);sun.target.position.set(6,0,2);
+sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);
+const sc=sun.shadow.camera;sc.left=-17;sc.right=17;sc.top=15;sc.bottom=-15;sc.near=1;sc.far=50;sun.shadow.bias=-.0004;
+scene.add(sun,sun.target);
+const lamp=new THREE.PointLight(0xffd166,0,0,2);lamp.position.set(13.8,2.3,.5);scene.add(lamp);
+
+const mk=(g,c,p=[0,0,0],par=scene)=>{const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:c,roughness:.6}));m.position.set(...p);m.castShadow=m.receiveShadow=true;par.add(m);return m};
+const B=(x,y,z)=>new THREE.BoxGeometry(x,y,z);
+const gr=mk(new THREE.PlaneGeometry(90,60),0xe8e0cf,[6,0,3]);gr.rotation.x=-Math.PI/2;gr.castShadow=false;
+
+// dominoes on a curve, last one heads along +x
+const N=15,H=1.5,doms=[];
+for(let i=0;i<N;i++){
+  const a=(140+130*i/(N-1))*Math.PI/180,dx=-Math.sin(a),dz=Math.cos(a);
+  const piv=new THREE.Group();
+  piv.position.set(4*Math.cos(a)+dx*.09,0,4+4*Math.sin(a)+dz*.09);
+  piv.rotation.y=Math.atan2(-dz,dx);
+  mk(B(.18,H,.7),new THREE.Color().setHSL(.02+.6*i/N,.7,.55),[-.09,H/2,0],piv);
+  scene.add(piv);doms.push({piv,dx,dz});
+}
+const fing=mk(B(.25,.25,.4),0xe76f51);
+fing.rotation.y=doms[0].piv.rotation.y;
+const sm=x=>x*x*(3-2*x),cl=(x,a,b)=>Math.min(b,Math.max(a,x));
+const domAng=(i,t)=>1.25*Math.pow(cl((t-.3-.3*i)/.55,0,1),2);
+
+// ramp
+const rx0=.5,ry0=1.25,rx1=4.3,ry1=.85,phi=Math.atan2(ry0-ry1,rx1-rx0),RL=Math.hypot(rx1-rx0,ry0-ry1),cp=Math.cos(phi),sp=Math.sin(phi);
+const ramp=mk(B(RL,.15,1.1),0x6d597a,[(rx0+rx1)/2-sp*.075,(ry0+ry1)/2-cp*.075,0]);ramp.rotation.z=-phi;
+mk(B(.3,1.1,.8),0x4a3f55,[.9,.55,0]);mk(B(.3,.75,.8),0x4a3f55,[4,.375,0]);
+const rp=s=>[rx0+s*cp+sp*.35,ry0-s*sp+cp*.35];
+
+function ball(r,c){const g=new THREE.Group();mk(new THREE.SphereGeometry(r,24,16),c,[0,0,0],g);
+  [[r,0,0],[0,r,0],[-r,0,0],[0,-r,0]].forEach(p=>mk(new THREE.SphereGeometry(r*.28,10,8),0xffffff,p,g));scene.add(g);return g}
+const ball1=ball(.35,0xe63946),ball2=ball(.3,0x4361ee);
+
+// seesaw
+const PX=5.8,PY=.45,TH0=-.22;
+const lev=new THREE.Group();lev.position.set(PX,PY,0);scene.add(lev);
+mk(B(2.8,.12,1),0x2a9d8f,[0,0,0],lev);mk(B(.12,.2,1),0x1d6f66,[-1.4,.1,0],lev);
+mk(B(.4,.4,1),0x555555,[PX,.2,0]).rotation.z=Math.PI/4;
+const L2W=(lx,ly,t)=>[PX+lx*Math.cos(t)-ly*Math.sin(t),PY+lx*Math.sin(t)+ly*Math.cos(t)];
+
+// tower, plate, lamp
+const blocks=[];
+for(let i=0;i<5;i++)blocks.push({m:mk(B(.5,.5,.5),i%2?0xf4a261:0xe9c46a,[10.5,.25+.5*i,0])});
+const plate=mk(B(1.4,.06,1),0x777777,[12.6,.03,0]);
+mk(B(.5,.04,.06),0x222222,[13.55,.02,.4]);
+mk(new THREE.CylinderGeometry(.07,.07,2,10),0x333333,[13.8,1,.5]);
+const bulb=mk(new THREE.SphereGeometry(.3,20,14),0x999977,[13.8,2.3,.5]);
+bulb.material.emissive=new THREE.Color(0xffc233);bulb.material.emissiveIntensity=0;
+
+let t,st,cur,flick,th,hit,lampOn,L1,L2,focus=new THREE.Vector3();
+function reset(){
+  t=0;st=0;cur=-1;flick=0;th=TH0;hit=false;lampOn=false;
+  L1={x:0,y:0,vx:0,vy:0,s:.5,v:0};L2={x:0,y:0,vx:0,vy:0,free:false};
+  blocks.forEach((b,i)=>{b.x=10.5;b.y=.25+.5*i;b.vx=b.vy=b.w=b.r=0;b.act=false});
+  chips.forEach(c=>c.classList.remove('on'));
+  plate.material.color.set(0x777777);bulb.material.emissiveIntensity=0;lamp.intensity=0;
+}
+function step(dt){
+  t+=dt;
+  if(cur<0&&t>.3){cur=0;lit(0)}
+  if(st==0&&domAng(N-1,t)>=.45){st=1;cur=1;lit(1);L1.v=1.3}
+  if(st==1){
+    L1.v+=3*dt;L1.s+=L1.v*dt;
+    if(L1.s>=RL){st=2;[L1.x,L1.y]=rp(RL);L1.vx=L1.v*cp;L1.vy=-L1.v*sp}
+  }else if(st==2){
+    L1.vy-=9.8*dt;L1.x+=L1.vx*dt;L1.y+=L1.vy*dt;
+    const dx=L1.x-PX,dy=L1.y-PY,c=Math.cos(TH0),s=Math.sin(TH0);
+    const lx=dx*c+dy*s,ly=-dx*s+dy*c;
+    if(L1.vy<0&&ly<=.41&&lx>-1.3&&lx<0){st=3;flick=0;cur=2;lit(2)}
+  }
+  if(st>=3){
+    flick+=dt;th=TH0+.44*sm(cl(flick/.18,0,1));
+    if(!L2.free&&flick>=.14){[L2.x,L2.y]=L2W(1,.36,th);L2.free=true;L2.vx=3.4;L2.vy=5.4}
+  }
+  if(L2.free){
+    L2.vy-=9.8*dt;L2.x+=L2.vx*dt;L2.y+=L2.vy*dt;
+    if(L2.y<.3){L2.y=.3;L2.vy=L2.vy<-1?-L2.vy*.4:0;L2.vx*=1-dt*2}
+    if(!hit&&L2.x+.3>=10.25&&L2.y<2.7){
+      hit=true;cur=3;lit(3);
+      const k=cl(Math.floor(L2.y/.5),0,4);
+      blocks.forEach((b,i)=>{if(i>=k){const j=i-k;b.act=true;b.vx=1.4+.5*j+.2*L2.vx;b.vy=1.5+.5*j;b.w=-5-2*j}});
+      L2.vx=-.8;L2.vy=1;
+    }
+  }
+  const q=Math.PI/2;
+  blocks.forEach(b=>{
+    if(!b.act)return;
+    b.vy-=9.8*dt;b.x+=b.vx*dt;b.y+=b.vy*dt;b.r+=b.w*dt;
+    if(b.y<=.25){
+      b.y=.25;b.vy=b.vy<-1?-b.vy*.3:0;b.vx*=1-dt*5;b.w*=1-dt*5;
+      b.r+=(Math.round(b.r/q)*q-b.r)*Math.min(1,dt*10);
+      if(!lampOn&&b.x>11.9&&b.x<13.3){lampOn=true;cur=4;lit(4);plate.material.color.set(0x2ecc71)}
+    }
+  });
+  if(lampOn){bulb.material.emissiveIntensity=Math.min(2.5,bulb.material.emissiveIntensity+dt*8);lamp.intensity=Math.min(40,lamp.intensity+dt*120)}
+  if(t>=10)reset();
+}
+
+let px1=0;
+function render(fdt){
+  doms.forEach((d,i)=>d.piv.rotation.z=-domAng(i,t));
+  const d0=doms[0],a0=domAng(0,t),f=t<.3?-1.2+.95*sm(t/.3):-.25+1.2*Math.sin(a0);
+  fing.visible=t<.8;
+  fing.position.set(d0.piv.position.x+d0.dx*(f-.09),1.2,d0.piv.position.z+d0.dz*(f-.09));
+  lev.rotation.z=th;
+  let p;
+  if(st==0)p=rp(.5);else if(st==1)p=rp(L1.s);else if(st==2)p=[L1.x,L1.y];else p=L2W(-1,.41,th);
+  ball1.position.set(p[0],p[1],0);ball1.rotation.z-=(p[0]-px1)/.35;px1=p[0];
+  const q=L2.free?[L2.x,L2.y]:L2W(1,.36,th);
+  ball2.position.set(q[0],q[1],0);if(L2.free)ball2.rotation.z-=L2.vx*fdt/.3;
+  blocks.forEach(b=>{b.m.position.set(b.x,b.y,0);b.m.rotation.z=b.r});
+  let tg;
+  if(cur<=0){const d=doms[cl(Math.floor((t-.3)/.3),0,N-1)].piv.position;tg=[d.x,.8,d.z]}
+  else if(cur==1)tg=[p[0],p[1],0];
+  else if(cur==2)tg=L2.free?[L2.x,L2.y*.6+.4,0]:[6,.8,0];
+  else if(cur==3)tg=[11,1,0];
+  else tg=[12.5,1,0];
+  focus.lerp(new THREE.Vector3(...tg),1-Math.exp(-3*fdt));
+  const k=Math.max(1,1.6/cam.aspect);
+  cam.position.set(focus.x+1.5*k,focus.y+5.5*k,focus.z+10*k);
+  cam.lookAt(focus);
+}
+function resize(){R.setSize(innerWidth,innerHeight);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()}
+addEventListener('resize',resize);resize();
+reset();focus.set(doms[0].piv.position.x,.8,doms[0].piv.position.z);
+let last=performance.now(),acc=0;
+R.setAnimationLoop(now=>{
+  const fdt=Math.min(.05,(now-last)/1000);last=now;acc+=fdt;
+  while(acc>=1/120){step(1/120);acc-=1/120}
+  render(fdt);R.render(scene,cam);
+});
+</script></body></html>

@@ -1,16 +1,132 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>origami-bench: how much can a model fold into 8,000 tokens?</title>
-<style>body{font:16px/1.5 system-ui,sans-serif;max-width:960px;margin:0 auto;padding:24px;color:#111}h1{margin:.2em 0}.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}figure{margin:0}img{width:100%;border-radius:8px}figcaption{font-size:13px;color:#666}table{border-collapse:collapse;width:100%;margin:16px 0}td,th{padding:8px;border-bottom:1px solid #eee;text-align:left}td a{display:inline-block;min-width:2em;color:#5b2ee6;font-weight:600}.m{color:#666;font-size:14px}</style></head><body>
-<h1>🦢 origami-bench</h1><p><b>How much can a model fold into 8,000 tokens?</b> Every model gets the same short prompt and must return one self-contained HTML file (three.js scene, physics sandbox, raymarching shader) under an 8,000-token output budget. Then it is <i>actually run</i>: headless WebKit, 7-second video, health checks, video-judge score.</p>
-<div class="g"><figure><img src="docs/walker.gif" alt="walker"><figcaption>Walking humanoid</figcaption></figure><figure><img src="docs/physics.gif" alt="physics"><figcaption>Physics sandbox</figcaption></figure><figure><img src="docs/gears.gif" alt="gears"><figcaption>Clockwork machine</figcaption></figure><figure><img src="docs/shader.gif" alt="shader"><figcaption>Raymarched SDF</figcaption></figure></div>
-<h2>Leaderboard (run of 2026-10-12)</h2><p class="m">Score 1-10 from the video judge, capped at 4 if nothing moves. <b>Click a score to open that model's scene live</b> in your browser.</p>
-<table><tr><th>#</th><th>model</th><th>mean</th><th>Walking humanoid</th><th>Physics sandbox</th><th>Clockwork machine</th><th>Raymarched SDF</th></tr>
-<tr><td>1</td><td>Claude Sonnet 5.5</td><td><b>7.2</b></td><td><a href="runs/2026-10-12/sonnet-5.5/walker/out.html" title="L’umanoide cammina con arti articolati e movimento fluido; pavimento a scacchi, ombre colorate e orbita della camera sono visibili. La cammi">7</a></td><td><a href="runs/2026-10-12/sonnet-5.5/physics/out.html" title="La scena mostra bene la scatola trasparente, le sfere colorate in caduta, le ombre e una lieve rotazione della camera. Negli ultimi fotogram">7</a></td><td><a href="runs/2026-10-12/sonnet-5.5/gears/out.html" title="The clockwork is detailed and smoothly animated, with meshing gears, a swinging pendulum, moving second hand, and warm metallic lighting. It">7</a></td><td><a href="runs/2026-10-12/sonnet-5.5/shader/out.html" title="Il blob si deforma fluidamente sopra un pavimento a scacchi con buona profondità, riflessi e ombre morbide. L’effetto è curato e aderente al">8</a></td></tr>
-<tr><td>2</td><td>Claude Opus 5.5</td><td><b>7.0</b></td><td><a href="runs/2026-10-12/opus-5.5/walker/out.html" title="The character has a readable walking gait as the camera orbits, with a checkered floor, shadows, fog, and colored light. The primitive figur">7</a></td><td><a href="runs/2026-10-12/opus-5.5/physics/out.html" title="La scena realizza bene la sandbox: sfere colorate cadono e si accumulano in una scatola trasparente, con ombre e profondità convincenti. Neg">7</a></td><td><a href="runs/2026-10-12/opus-5.5/gears/out.html" title="La macchina è riconoscibile, con ingranaggi metallici che ruotano e una buona illuminazione. Si vedono meno di otto ingranaggi e il pendolo ">6</a></td><td><a href="runs/2026-10-12/opus-5.5/shader/out.html" title="La scena è ben realizzata: la forma blob si deforma fluidamente sopra un pavimento a scacchi con profondità e ombra morbida. L’animazione pe">8</a></td></tr>
-<tr><td>3</td><td>Muse Spark 1.3</td><td><b>6.5</b></td><td><a href="runs/2026-10-12/muse-spark-1.3/walker/out.html" title="La scena include il pavimento a scacchi, luci colorate, ombre e un’orbita fluida della camera. Il personaggio cammina con braccia e gambe ar">7</a></td><td><a href="runs/2026-10-12/muse-spark-1.3/physics/out.html" title="La scena mostra una scatola aperta trasparente, molte sfere colorate che cadono e si accumulano, ombre e camera in rotazione. C’è un breve a">7</a></td><td><a href="runs/2026-10-12/muse-spark-1.3/gears/out.html" title="Si riconoscono ingranaggi, pendolo e lancetta in movimento, con materiali metallici e un po’ di profondità. Però si vedono solo pochi ingran">5</a></td><td><a href="runs/2026-10-12/muse-spark-1.3/shader/out.html" title="La scena soddisfa bene il compito: blob animato, pavimento ripetuto, ombre morbide e camera in movimento. L’aspetto è curato, anche se i pri">7</a></td></tr>
-<tr><td>4</td><td>Muse Wonder Full 1.0</td><td><b>6.2</b></td><td><a href="runs/2026-10-12/muse-wonder-full/walker/out.html" title="Si riconoscono il personaggio che cammina, il pavimento a scacchi, le ombre e la luce colorata, con la camera che orbita. L’andatura è rigid">6</a></td><td><a href="runs/2026-10-12/muse-wonder-full/physics/out.html" title="Si riconoscono la vasca trasparente, le sfere colorate che cadono e si accumulano, con ombre e profondità. Il movimento è semplice e lo scuo">6</a></td><td><a href="runs/2026-10-12/muse-wonder-full/gears/out.html" title="The clockwork is recognizable and has attractive metallic lighting and depth, with a pendulum that visibly swings. Only about five gears are">6</a></td><td><a href="runs/2026-10-12/muse-wonder-full/shader/out.html" title="La blob si anima fluidamente sopra un pavimento prospettico, con luce colorata e ombra morbida che danno profondità. I primi fotogrammi sono">7</a></td></tr>
-<tr><td>5</td><td>gpt-6-luna</td><td><b>6.0</b></td><td><a href="runs/2026-10-12/gpt-6-luna/walker/out.html" title="L’umanoide cammina e la camera gli gira attorno su un pavimento a scacchi, con ombre e foschia visibili. Il passo è rigido, con braccia quas">6</a></td><td><a href="runs/2026-10-12/gpt-6-luna/physics/out.html" title="La scena è ben realizzata: le sfere colorate cadono nel contenitore trasparente e formano una pila, con ombre e buona profondità. Nei fotogr">7</a></td><td><a href="runs/2026-10-12/gpt-6-luna/gears/out.html" title="Si riconoscono gli otto ingranaggi e il pendolo oscilla con luci e ombre curate. La macchina appare però quasi piatta e la rotazione degli i">4</a></td><td><a href="runs/2026-10-12/gpt-6-luna/shader/out.html" title="La scena mostra un blob che si deforma con continuità su un pavimento a griglia, con riflessi, alone luminoso e ombra morbida. È pulita e co">7</a></td></tr>
-<tr><td>6</td><td>free-auto (free router)</td><td><b>4.0</b></td><td><a href="runs/2026-10-12/free-auto/walker/out.html" title="Si riconoscono un umanoide articolato in cammino e ombre che danno profondità, ma l’andatura è rigida e il pavimento è uniforme, senza scacc">5</a></td><td><a href="runs/2026-10-12/free-auto/physics/out.html" title="Si riconoscono la scatola trasparente e le sfere colorate che cadono e si accumulano. Poi la scena resta quasi ferma: non si vedono cadute c">5</a></td><td><a href="runs/2026-10-12/free-auto/gears/out.html" title="A layered gear machine is recognizable and appears to move, but the extreme darkness and subtle motion make the meshing, pendulum, and secon">5</a></td><td><a href="runs/2026-10-12/free-auto/shader/out.html" title="blank or not rendered (judge not called)">1</a></td></tr>
-</table>
-<p class="m">Differences under half a point are noise. The two Muse rows were scored by a different judge than the others, so compare them with care. Full table with judge notes: <a href="https://github.com/zorahrel/origami-bench/blob/main/results/2026-10-12.md">results/2026-10-12.md</a> · code and method: <a href="https://github.com/zorahrel/origami-bench">GitHub</a>.</p>
-</body></html>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:1100px;margin:0 auto;padding:24px;color:#111}h1{margin:.2em 0}table.lb{border-collapse:collapse;width:100%;margin:16px 0}
+td,th{padding:8px;border-bottom:1px solid #eee;text-align:left}.m{color:#666;font-size:14px}a{color:#5b2ee6}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.grid h4{margin:0;font-size:13px;color:#666;font-weight:600}
+.cell{background:#f6f6f8;border-radius:8px;overflow:hidden;font-size:13px}.cell video,.cell .na{width:100%;aspect-ratio:8/5;display:block;background:#111;object-fit:cover}
+.na{color:#fff;display:flex!important;align-items:center;justify-content:center}.cell div{padding:5px 8px;display:flex;justify-content:space-between;gap:6px}
+.s{font-weight:700}h3{margin:28px 0 8px}@media(max-width:800px){.grid{grid-template-columns:repeat(2,1fr)}}</style></head><body>
+<h1>🦢 origami-bench</h1><p><b>How much can a model fold into 8,000 tokens?</b> Every model gets the same short prompt and must return one self-contained HTML file under an 8,000-token output budget. It is then <i>actually run</i>: headless WebKit, 10-second video, health checks, video-judge score.</p>
+<p class="m">Run of 2026-10-13: <b>hard tasks</b> (chained sequences, not demos). <a href="previous-run.html">Previous run (easy tasks, 2026-10-12)</a> · <a href="https://github.com/zorahrel/origami-bench">code and method</a></p>
+<h2>Leaderboard</h2><table class="lb"><tr><th>#</th><th>model</th><th>mean</th><th>Parkour + combat fighter</th><th>Rube-Goldberg chain</th><th>Clockwork automaton</th><th>Raymarched SDF scene</th></tr>
+<tr><td>1</td><td>Claude Sonnet 5.5</td><td><b>6.5</b></td>
+<td><a href="#sonnet-5.5-walker">6</a></td>
+<td><a href="#sonnet-5.5-physics">8</a></td>
+<td><a href="#sonnet-5.5-gears">5</a></td>
+<td><a href="#sonnet-5.5-shader">7</a></td>
+</tr>
+<tr><td>2</td><td>Muse Wonder Full 1.0</td><td><b>6.5</b></td>
+<td><a href="#muse-wonder-full-walker">7</a></td>
+<td><a href="#muse-wonder-full-physics">7</a></td>
+<td><a href="#muse-wonder-full-gears">5</a></td>
+<td><a href="#muse-wonder-full-shader">7</a></td>
+</tr>
+<tr><td>3</td><td>Muse Spark 1.3</td><td><b>6.2</b></td>
+<td><a href="#muse-spark-1.3-walker">7</a></td>
+<td><a href="#muse-spark-1.3-physics">7</a></td>
+<td><a href="#muse-spark-1.3-gears">5</a></td>
+<td><a href="#muse-spark-1.3-shader">6</a></td>
+</tr>
+<tr><td>4</td><td>Claude Opus 5.5</td><td><b>6.0</b></td>
+<td><a href="#opus-5.5-walker">6</a></td>
+<td><a href="#opus-5.5-physics">7</a></td>
+<td><a href="#opus-5.5-gears">4</a></td>
+<td><a href="#opus-5.5-shader">7</a></td>
+</tr>
+<tr><td>5</td><td>gpt-6-luna</td><td><b>5.5</b></td>
+<td><a href="#gpt-6-luna-walker">6</a></td>
+<td><a href="#gpt-6-luna-physics">7</a></td>
+<td><a href="#gpt-6-luna-gears">4</a></td>
+<td><a href="#gpt-6-luna-shader">5</a></td>
+</tr>
+<tr><td>6</td><td>free-auto (free router)</td><td><b>3.8</b></td>
+<td><a href="#free-auto-walker">5</a></td>
+<td><a href="#free-auto-physics">5</a></td>
+<td><a href="#free-auto-gears">4</a></td>
+<td><a href="#free-auto-shader">1</a></td>
+</tr>
+</table><p class="m">Score 1-10 from the video judge, capped at 4 if nothing moves. Judge: gpt-6-luna looking at 16 frames per video (same judge for every row). One run per cell: differences under ~0.5-1 point are noise. Each clip below is that cell's real 10-second render; click "live" to run the scene in your browser.</p>
+<h3>Parkour + combat fighter</h3><div class="grid">
+<div class="cell" id="sonnet-5.5-walker"><h4 style="padding:5px 8px 0">Claude Sonnet 5.5</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/sonnet-5.5/walker/poster.jpg" data-src="runs/2026-10-13/sonnet-5.5/walker/clip.mp4"></video>
+<div><span class="s" title="The low-poly articulated fighter runs in a checkered arena with a striped wall, changing camera angles, visible colored lighting and shadows, and phase labels for crouch, punch, kick, spin kick, and reset. Wall-run and flip are labeled but not clearly shown, fog and a completed loop aren’t evident, so the sequence is recognizable but only simply executed.">6/10</span><a href="runs/2026-10-13/sonnet-5.5/walker/out.html">live</a></div></div>
+<div class="cell" id="muse-wonder-full-walker"><h4 style="padding:5px 8px 0">Muse Wonder Full 1.0</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/muse-wonder-full/walker/poster.jpg" data-src="runs/2026-10-13/muse-wonder-full/walker/clip.mp4"></video>
+<div><span class="s" title="A stylized articulated fighter runs, wall-runs, flips, lands in a crouch, and begins a labeled three-hit combo in a checkered arena with visible lighting, shadows, and depth. The combo is mostly hidden by a foreground block, and no reset or loop is shown.">7/10</span><a href="runs/2026-10-13/muse-wonder-full/walker/out.html">live</a></div></div>
+<div class="cell" id="muse-spark-1.3-walker"><h4 style="padding:5px 8px 0">Muse Spark 1.3</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/muse-spark-1.3/walker/poster.jpg" data-src="runs/2026-10-13/muse-spark-1.3/walker/clip.mp4"></video>
+<div><span class="s" title="A visibly articulated fighter runs at the striped wall, wall-runs, pushes off into a flip, lands, and performs a punch, kick, and spin kick; the checkered arena, phase labels, following camera, colored lighting, and shadows are visible. The motion looks simple, fog is not apparent, and these frames do not show the reset or completed loop.">7/10</span><a href="runs/2026-10-13/muse-spark-1.3/walker/out.html">live</a></div></div>
+<div class="cell" id="opus-5.5-walker"><h4 style="padding:5px 8px 0">Claude Opus 5.5</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/opus-5.5/walker/poster.jpg" data-src="runs/2026-10-13/opus-5.5/walker/clip.mp4"></video>
+<div><span class="s" title="The fighter runs to the striped wall, wall-runs, flips, lands, then punches and kicks; the phase labels, checkered arena, colored lighting, shadows, and following camera are visible. A third combo hit, reset loop, and clear fog are not shown, and the animation remains fairly simple.">6/10</span><a href="runs/2026-10-13/opus-5.5/walker/out.html">live</a></div></div>
+<div class="cell" id="gpt-6-luna-walker"><h4 style="padding:5px 8px 0">gpt-6-luna</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/gpt-6-luna/walker/poster.jpg" data-src="runs/2026-10-13/gpt-6-luna/walker/clip.mp4"></video>
+<div><span class="s" title="The articulated, blocky fighter, checkered arena and striped wall, phase labels, changing camera view, run, airborne flip, crouched landing, and jab/kick/spin-kick are visible, with floor shadows. A feet-on-wall run and reset/loop are not clearly shown; fog, colored point light, and smooth camera lag are also unclear.">6/10</span><a href="runs/2026-10-13/gpt-6-luna/walker/out.html">live</a></div></div>
+<div class="cell" id="free-auto-walker"><h4 style="padding:5px 8px 0">free-auto (free router)</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/free-auto/walker/poster.jpg" data-src="runs/2026-10-13/free-auto/walker/clip.mp4"></video>
+<div><span class="s" title="The articulated primitive fighter runs toward a striped wall and appears in a horizontal wall-run pose, with phase labels, a grid floor, changing camera angles, and a visible shadow. The flip, landing, and three-hit combo are not clearly shown beyond their labels and one punch pose; the floor is not checkered, and fog, colored lighting, and a reset loop are not evident.">5/10</span><a href="runs/2026-10-13/free-auto/walker/out.html">live</a></div></div>
+</div>
+<h3>Rube-Goldberg chain</h3><div class="grid">
+<div class="cell" id="sonnet-5.5-physics"><h4 style="padding:5px 8px 0">Claude Sonnet 5.5</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/sonnet-5.5/physics/poster.jpg" data-src="runs/2026-10-13/sonnet-5.5/physics/clip.mp4"></video>
+<div><span class="s" title="A curved row of 12+ dominoes topples in order, sending a red ball down a ramp to tip a seesaw and launch a blue ball; it knocks over the block stack and lights the lamp, while stages 1–5 light in sequence and the camera tracks the action with visible shadows and depth. The motion is smooth and readable, but these frames don’t show an automatic reset.">8/10</span><a href="runs/2026-10-13/sonnet-5.5/physics/out.html">live</a></div></div>
+<div class="cell" id="muse-wonder-full-physics"><h4 style="padding:5px 8px 0">Muse Wonder Full 1.0</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/muse-wonder-full/physics/poster.jpg" data-src="runs/2026-10-13/muse-wonder-full/physics/clip.mp4"></video>
+<div><span class="s" title="Visible: 12+ dominoes topple in sequence, the red ball rolls down the ramp and tips the seesaw, the blue ball launches and scatters the blocks, then the lamp lights and flag rises; shadows, camera tracking, and stage labels are present. The 3D animation is clear but simple, and auto-reset is not shown.">7/10</span><a href="runs/2026-10-13/muse-wonder-full/physics/out.html">live</a></div></div>
+<div class="cell" id="muse-spark-1.3-physics"><h4 style="padding:5px 8px 0">Muse Spark 1.3</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/muse-spark-1.3/physics/poster.jpg" data-src="runs/2026-10-13/muse-spark-1.3/physics/clip.mp4"></video>
+<div><span class="s" title="The dominoes topple in sequence, a ball rolls down the ramp, the blocks fall, and the lamp lights and flag rises; the camera tracks the action, with shadows and stage labels. The lever-to-second-ball handoff is hard to verify visually, and no auto-reset appears in these frames.">7/10</span><a href="runs/2026-10-13/muse-spark-1.3/physics/out.html">live</a></div></div>
+<div class="cell" id="opus-5.5-physics"><h4 style="padding:5px 8px 0">Claude Opus 5.5</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/opus-5.5/physics/poster.jpg" data-src="runs/2026-10-13/opus-5.5/physics/clip.mp4"></video>
+<div><span class="s" title="The dominoes topple in sequence, the first ball rolls down the ramp and launches the second from the seesaw, which knocks over the blocks before the flag rises; the camera tracks the action, with shadows and stage labels lighting up. The animation is clear and polished, but auto-reset isn’t visible.">7/10</span><a href="runs/2026-10-13/opus-5.5/physics/out.html">live</a></div></div>
+<div class="cell" id="gpt-6-luna-physics"><h4 style="padding:5px 8px 0">gpt-6-luna</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/gpt-6-luna/physics/poster.jpg" data-src="runs/2026-10-13/gpt-6-luna/physics/clip.mp4"></video>
+<div><span class="s" title="The frames show a curved domino-like run, a rolling ball, a seesaw launching another ball, falling blocks, and a raised flag, with numbered stages lighting in sequence and a tracking view with shadows. The compact scene is clear and polished, though the dominoes and cause-and-effect details are small and stylized.">7/10</span><a href="runs/2026-10-13/gpt-6-luna/physics/out.html">live</a></div></div>
+<div class="cell" id="free-auto-physics"><h4 style="padding:5px 8px 0">free-auto (free router)</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/free-auto/physics/poster.jpg" data-src="runs/2026-10-13/free-auto/physics/clip.mp4"></video>
+<div><span class="s" title="Visible: a curved domino cascade, a seesaw, collapsing blocks, numbered stages that light up in sequence, and a final yellow lamp or marker beside a flag. The ramp and rolling balls, visible cause between each stage, lamp activation or flag raising, shadows, camera tracking, and auto-reset are not clearly shown.">5/10</span><a href="runs/2026-10-13/free-auto/physics/out.html">live</a></div></div>
+</div>
+<h3>Clockwork automaton</h3><div class="grid">
+<div class="cell" id="sonnet-5.5-gears"><h4 style="padding:5px 8px 0">Claude Sonnet 5.5</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/sonnet-5.5/gears/poster.jpg" data-src="runs/2026-10-13/sonnet-5.5/gears/clip.mp4"></video>
+<div><span class="s" title="About six gears, a swinging pendulum, clock hands, a bell and lever, and a layered metallic scene with lighting are visible; camera drift is unclear. The frames don’t establish one master angle, 8+ gears with correct tooth counts and opposite rotation, a ticking anchor escapement, a 1:60 hand ratio, or a figure striking in sync.">5/10</span><a href="runs/2026-10-13/sonnet-5.5/gears/out.html">live</a></div></div>
+<div class="cell" id="muse-wonder-full-gears"><h4 style="padding:5px 8px 0">Muse Wonder Full 1.0</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/muse-wonder-full/gears/poster.jpg" data-src="runs/2026-10-13/muse-wonder-full/gears/clip.mp4"></video>
+<div><span class="s" title="Several brass gears visibly turn and a glowing bob shifts in a detailed clock scene, but an 8+ gear train, connected ticking escapement, correctly proportioned clock hands, and a bell strike synchronized to the ticks are not visibly demonstrated.">5/10</span><a href="runs/2026-10-13/muse-wonder-full/gears/out.html">live</a></div></div>
+<div class="cell" id="muse-spark-1.3-gears"><h4 style="padding:5px 8px 0">Muse Spark 1.3</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/muse-spark-1.3/gears/poster.jpg" data-src="runs/2026-10-13/muse-spark-1.3/gears/clip.mp4"></video>
+<div><span class="s" title="The clockwork scene has visible hand and pendulum motion, with lighting and layered depth, but only a few gears are visible and their tooth counts or rotation ratio cannot be confirmed. An anchor-like mechanism and “TICK/TOCK” labels appear, but no striking figure or bird is visible.">5/10</span><a href="runs/2026-10-13/muse-spark-1.3/gears/out.html">live</a></div></div>
+<div class="cell" id="opus-5.5-gears"><h4 style="padding:5px 8px 0">Claude Opus 5.5</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/opus-5.5/gears/poster.jpg" data-src="runs/2026-10-13/opus-5.5/gears/clip.mp4"></video>
+<div><span class="s" title="Several gears and dial-like hands are visible, with slight motion, but there are fewer than eight gears and no clearly visible opposite rotation, 1:60 hand ratio, swinging pendulum, or anchor escapement. The bell and layered metallic lighting are present, but no cam-driven striker or bird is visible, and camera drift is unclear.">4/10</span><a href="runs/2026-10-13/opus-5.5/gears/out.html">live</a></div></div>
+<div class="cell" id="gpt-6-luna-gears"><h4 style="padding:5px 8px 0">gpt-6-luna</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/gpt-6-luna/gears/poster.jpg" data-src="runs/2026-10-13/gpt-6-luna/gears/clip.mp4"></video>
+<div><span class="s" title="The metallic clockwork scene is richly lit and animated, with about seven visible gears, two dial hands, a swinging linkage, and a small figure beside a bell. A clear anchor escapement, the 1:60 hand ratio, and a synchronized bell strike aren’t visibly established; the first frames are blank. [capped at 4: no animation detected]">4/10</span><a href="runs/2026-10-13/gpt-6-luna/gears/out.html">live</a></div></div>
+<div class="cell" id="free-auto-gears"><h4 style="padding:5px 8px 0">free-auto (free router)</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/free-auto/gears/poster.jpg" data-src="runs/2026-10-13/free-auto/gears/clip.mp4"></video>
+<div><span class="s" title="A dim clockwork assembly with several visible gears and slight movement is present, but fewer than eight gears are clearly countable and opposite rotation is not verifiable. The dial has no visible 1:60 hand pair, and no cam-driven figure striking in sync with the pendulum is apparent. [capped at 4: no animation detected]">4/10</span><a href="runs/2026-10-13/free-auto/gears/out.html">live</a></div></div>
+</div>
+<h3>Raymarched SDF scene</h3><div class="grid">
+<div class="cell" id="sonnet-5.5-shader"><h4 style="padding:5px 8px 0">Claude Sonnet 5.5</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/sonnet-5.5/shader/poster.jpg" data-src="runs/2026-10-13/sonnet-5.5/shader/clip.mp4"></video>
+<div><span class="s" title="A full-frame animated scene shows a floor, sphere-like bulges, a torus loop, a box, and a capsule blended into a moving form; the view orbits around it. Soft shadows, contact darkening, glossy reflections, rim highlights, and tone-mapped lighting are visible, though the shape has rough artifacts; smooth-minning and first-try compilation cannot be confirmed from frames alone.">7/10</span><a href="runs/2026-10-13/sonnet-5.5/shader/out.html">live</a></div></div>
+<div class="cell" id="muse-wonder-full-shader"><h4 style="padding:5px 8px 0">Muse Wonder Full 1.0</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/muse-wonder-full/shader/poster.jpg" data-src="runs/2026-10-13/muse-wonder-full/shader/clip.mp4"></video>
+<div><span class="s" title="The frames visibly show a sphere, torus, box, and capsule moving and briefly blending above a floor, with soft shadows, contact shading, glossy reflections, and an orbit-like changing view. Rim glow and one-bounce reflections are subtle, and compilation cannot be judged from frames alone.">7/10</span><a href="runs/2026-10-13/muse-wonder-full/shader/out.html">live</a></div></div>
+<div class="cell" id="muse-spark-1.3-shader"><h4 style="padding:5px 8px 0">Muse Spark 1.3</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/muse-spark-1.3/shader/poster.jpg" data-src="runs/2026-10-13/muse-spark-1.3/shader/clip.mp4"></video>
+<div><span class="s" title="All four primitives and the floor are visible; the camera orbits, with soft shadows and faint floor reflections. Smooth-min blending, ambient occlusion, one-bounce reflections, fresnel glow, tone mapping, and first-try compilation cannot be confirmed from these frames.">6/10</span><a href="runs/2026-10-13/muse-spark-1.3/shader/out.html">live</a></div></div>
+<div class="cell" id="opus-5.5-shader"><h4 style="padding:5px 8px 0">Claude Opus 5.5</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/opus-5.5/shader/poster.jpg" data-src="runs/2026-10-13/opus-5.5/shader/clip.mp4"></video>
+<div><span class="s" title="Sphere, torus, box, and capsule-like forms appear over a checker floor and deform or blend as they move; soft shadows, glossy colored edge glow, and a changing viewpoint are visible. Distinct ambient occlusion, one-bounce reflections, tone mapping, and first-try compilation cannot be confirmed from these frames.">7/10</span><a href="runs/2026-10-13/opus-5.5/shader/out.html">live</a></div></div>
+<div class="cell" id="gpt-6-luna-shader"><h4 style="padding:5px 8px 0">gpt-6-luna</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/gpt-6-luna/shader/poster.jpg" data-src="runs/2026-10-13/gpt-6-luna/shader/clip.mp4"></video>
+<div><span class="s" title="A sphere, box, capsule, and torus-like form sit on a reflective floor as the camera orbits, with visible shadows and reflections. The scene stays simple, and smooth blending, rich lighting, and rim glow are not clearly visible.">5/10</span><a href="runs/2026-10-13/gpt-6-luna/shader/out.html">live</a></div></div>
+<div class="cell" id="free-auto-shader"><h4 style="padding:5px 8px 0">free-auto (free router)</h4>
+<video muted loop playsinline preload="none" poster="runs/2026-10-13/free-auto/shader/poster.jpg" data-src="runs/2026-10-13/free-auto/shader/clip.mp4"></video>
+<div><span class="s" title="blank or not rendered (judge not called)">1/10</span><a href="runs/2026-10-13/free-auto/shader/out.html">live</a></div></div>
+</div>
+<script>
+const io=new IntersectionObserver(es=>es.forEach(x=>{const v=x.target;if(x.isIntersecting){if(!v.src)v.src=v.dataset.src;v.play().catch(()=>{})}else v.pause()}),{threshold:.3});
+document.querySelectorAll("video").forEach(v=>io.observe(v));
+</script></body></html>

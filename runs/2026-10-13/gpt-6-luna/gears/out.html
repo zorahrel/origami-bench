@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The Aureole Clockwork Automaton</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#090d10}
+body{font-family:Georgia,"Times New Roman",serif}
+canvas{display:block;width:100%;height:100%}
+#shade{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%,transparent 46%,rgba(4,7,9,.34) 100%),linear-gradient(180deg,rgba(7,12,15,.25),transparent 20%,transparent 78%,rgba(5,8,10,.36)}
+#hud{position:fixed;inset:0;pointer-events:none;color:#d4bd8c}
+.brand{position:absolute;top:25px;left:30px;letter-spacing:.22em;font-size:11px;text-transform:uppercase;text-shadow:0 1px 12px #000}
+.brand strong{display:block;margin-top:7px;color:#f1dfb5;letter-spacing:.12em;font-size:19px;font-weight:400}
+.readout{position:absolute;right:30px;top:29px;display:flex;align-items:center;gap:10px;font:10px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.15em;color:#c9b27d}
+.beat-dot{width:7px;height:7px;border-radius:50%;background:#e5bc66;box-shadow:0 0 12px #dcae50;opacity:.45}
+.footer{position:absolute;bottom:24px;left:30px;color:rgba(211,192,149,.63);font:9px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.16em;text-transform:uppercase}
+.footer span{color:#e4c985}
+@media(max-width:600px){.brand{top:16px;left:18px}.brand strong{font-size:15px}.readout{right:18px;top:18px;font-size:8px}.footer{left:18px;bottom:16px}}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="shade"></div>
+<div id="hud">
+  <div class="brand">Horological works · No. 08<strong>The Aureole Automaton</strong></div>
+  <div class="readout"><i class="beat-dot"></i><span>REGULATOR&nbsp; / &nbsp;60 BPM</span></div>
+  <div class="footer">30T escape wheel <span>·</span> 8-wheel train <span>·</span> pendulum beat</div>
+</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const TAU = Math.PI * 2;
+const stage = document.getElementById('stage');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x101719);
+
+const envCanvas = document.createElement('canvas');
+envCanvas.width = 512;
+envCanvas.height = 256;
+const envCtx = envCanvas.getContext('2d');
+const envGradient = envCtx.createLinearGradient(0, 0, 0, 256);
+envGradient.addColorStop(0, '#243138');
+envGradient.addColorStop(.42, '#101b20');
+envGradient.addColorStop(1, '#38281b');
+envCtx.fillStyle = envGradient;
+envCtx.fillRect(0, 0, 512, 256);
+for (const [x, y, radius, color] of [
+  [95, 70, 95, 'rgba(221,184,112,.62)'],
+  [310, 90, 105, 'rgba(124,174,189,.40)'],
+  [440, 185, 110, 'rgba(206,133,67,.34)']
+]) {
+  const glow = envCtx.createRadialGradient(x, y, 2, x, y, radius);
+  glow.addColorStop(0, color);
+  glow.addColorStop(1, 'rgba(0,0,0,0)');
+  envCtx.fillStyle = glow;
+  envCtx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+}
+const envTexture = new THREE.CanvasTexture(envCanvas);
+envTexture.mapping = THREE.EquirectangularReflectionMapping;
+envTexture.colorSpace = THREE.SRGBColorSpace;
+scene.environment = envTexture;
+scene.environmentIntensity = .62;
+
+const camera = new THREE.OrthographicCamera(-9, 9, 5, -5, .1, 100);
+camera.position.set(0, 0, 26);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:false});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.8));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.22;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+stage.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xb7d3dc, 0x342417, 1.35));
+scene.add(new THREE.AmbientLight(0x58616a, .38));
+const keyLight = new THREE.DirectionalLight(0xffe3ae, 3.2);
+keyLight.position.set(-6, 8, 10);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(2048, 2048);
+keyLight.shadow.camera.left = -12;
+keyLight.shadow.camera.right = 12;
+keyLight.shadow.camera.top = 10;
+keyLight.shadow.camera.bottom = -10;
+keyLight.shadow.camera.near = .5;
+keyLight.shadow.camera.far = 35;
+keyLight.shadow.bias = -.00035;
+keyLight.shadow.radius = 5;
+scene.add(keyLight);
+const coolFill = new THREE.PointLight(0x75b7d4, 85, 20, 2);
+coolFill.position.set(6, 4, 7);
+scene.add(coolFill);
+const warmFill = new THREE.PointLight(0xd98d45, 72, 18, 2);
+warmFill.position.set(-6, -3, 5);
+scene.add(warmFill);
+const dialGlow = new THREE.PointLight(0xffd389, 18, 5, 2);
+dialGlow.position.set(-2.1, 3.2, 1.5);
+scene.add(dialGlow);
+
+const mat = (color, metalness, roughness, extra={}) =>
+  new THREE.MeshStandardMaterial({color, metalness, roughness, ...extra});
+const brass = mat(0xc99a4d, .78, .27);
+const paleGold = mat(0xe0bd72, .72, .23);
+const darkBrass = mat(0x78532c, .79, .34);
+const steel = mat(0x82969a, .82, .25);
+const blueSteel = mat(0x36545e, .78, .29);
+const copper = mat(0xa85f38, .72, .3);
+const darkMetal = mat(0x1c292d, .78, .35);
+const enamel = mat(0x182326, .4, .3);
+const ivory = mat(0xd8c79f, .24, .42);
+const redLacquer = mat(0x9f3f2d, .48, .28);
+const glowGold = new THREE.MeshStandardMaterial({
+  color:0xf4d38e, metalness:.32, roughness:.22, emissive:0x613d12, emissiveIntensity:.36
+});
+
+function addMesh(geometry, material, parent=scene) {
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+function box(w, h, d, material, parent=scene) {
+  return addMesh(new THREE.BoxGeometry(w, h, d), material, parent);
+}
+function cylinderZ(radius, depth, material, segments=48, parent=scene) {
+  const mesh = addMesh(new THREE.CylinderGeometry(radius, radius, depth, segments), material, parent);
+  mesh.rotation.x = Math.PI / 2;
+  return mesh;
+}
+function torus(radius, tube, material, parent=scene) {
+  return addMesh(new THREE.TorusGeometry(radius, tube, 10, 72), material, parent);
+}
+function roundedRect(w, h, r) {
+  const s = new THREE.Shape();
+  s.moveTo(-w/2+r, -h/2);
+  s.lineTo(w/2-r, -h/2);
+  s.quadraticCurveTo(w/2, -h/2, w/2, -h/2+r);
+  s.lineTo(w/2, h/2-r);
+  s.quadraticCurveTo(w/2, h/2, w/2-r, h/2);
+  s.lineTo(-w/2+r, h/2);
+  s.quadraticCurveTo(-w/2, h/2, -w/2, h/2-r);
+  s.lineTo(-w/2, -h/2+r);
+  s.quadraticCurveTo(-w/2, -h/2, -w/2+r, -h/2);
+  return s;
+}
+function staticBar(parent, x1, y1, x2, y2, width, depth, material, z=0) {
+  const dx = x2-x1, dy = y2-y1;
+  const mesh = box(1, width, depth, material, parent);
+  mesh.position.set((x1+x2)/2, (y1+y2)/2, z);
+  mesh.rotation.z = Math.atan2(dy, dx);
+  mesh.scale.x = Math.hypot(dx, dy);
+  return mesh;
+}
+function positionBar(mesh, x1, y1, x2, y2, z) {
+  const dx = x2-x1, dy = y2-y1;
+  mesh.position.set((x1+x2)/2, (y1+y2)/2, z);
+  mesh.rotation.z = Math.atan2(dy, dx);
+  mesh.scale.set(Math.max(.015, Math.hypot(dx, dy)), 1, 1);
+}
+function textSprite(text, x, y, size, color='#d9c79e', font='Georgia') {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, 256, 128);
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `600 58px ${font}`;
+  ctx.fillText(text, 128, 67);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map:texture, transparent:true, depthWrite:false
+  }));
+  sprite.position.set(x, y, .9);
+  sprite.scale.set(size*2, size, 1);
+  scene.add(sprite);
+  return sprite;
+}
+
+// La piastra e il telaio tengono insieme i diversi piani del meccanismo.
+const plate = addMesh(
+  new THREE.ExtrudeGeometry(roundedRect(16.55, 9.35, .28), {
+    depth:.36, bevelEnabled:true, bevelSegments:2, bevelSize:.06, bevelThickness:.06
+  }),
+  darkMetal
+);
+plate.position.set(0, 0, -1.65);
+const inset = box(16.1, 8.95, .10, enamel);
+inset.position.set(0, 0, -1.12);
+for (const y of [-4.48, 4.48]) {
+  const rail = box(16.25, .075, .14, darkBrass);
+  rail.position.set(0, y, -.88);
+}
+for (const x of [-8.08, 8.08]) {
+  const rail = box(.075, 8.95, .14, darkBrass);
+  rail.position.set(x, 0, -.88);
+}
+for (const x of [-7.75, 7.75]) {
+  for (const y of [-4.12, 4.12]) {
+    const bolt = cylinderZ(.13, .12, paleGold, 8);
+    bolt.position.set(x, y, -.78);
+    const slot = box(.12, .025, .025, darkMetal);
+    slot.position.set(x, y, -.69);
+    slot.rotation.z = .4;
+  }
+}
+const centerLine = box(14.9, .025, .025, darkBrass);
+centerLine.position.set(0, -.60, -.88);
+for (const x of [-7.0, 7.0]) {
+  const post = box(.035, 7.9, .03, darkBrass);
+  post.position.set(x, 0, -.91);
+}
+
+// Quadrante, indici e lancette: un giro della lancetta dei secondi equivale a 60 della minuteria.
+const dialX = -2.08, dialY = 3.17, dialR = 1.48;
+const dialBacking = addMesh(new THREE.CircleGeometry(dialR+.11, 96), darkBrass);
+dialBacking.position.set(dialX, dialY, -.69);
+const dialBezel = torus(dialR+.045, .055, paleGold);
+dialBezel.position.set(dialX, dialY, -.54);
+const dialFace = addMesh(new THREE.CircleGeometry(dialR, 96), ivory);
+dialFace.position.set(dialX, dialY, -.56);
+const dialInner = torus(1.31, .012, darkBrass);
+dialInner.position.set(dialX, dialY, -.49);
+const dialCenterRing = torus(.22, .018, darkBrass);
+dialCenterRing.position.set(dialX, dialY, -.43);
+
+for (let i=0; i<60; i++) {
+  const angle = i*TAU/60;
+  const major = i%5===0;
+  const length = major ? .16 : .075;
+  const radius = 1.205;
+  const mark = box(major?.034:.018, length, .025, major?darkBrass:blueSteel);
+  mark.position.set(dialX+Math.sin(angle)*radius, dialY+Math.cos(angle)*radius, -.43);
+  mark.rotation.z = -angle;
+}
+textSprite('12', dialX, dialY+1.00, .22, '#573f25');
+textSprite('3', dialX+1.00, dialY, .22, '#573f25');
+textSprite('6', dialX, dialY-1.00, .22, '#573f25');
+textSprite('9', dialX-1.00, dialY, .22, '#573f25');
+
+function handMesh(length, width, material) {
+  const shape = new THREE.Shape();
+  shape.moveTo(-width*.55, -.18);
+  shape.lineTo(-width*.34, .12);
+  shape.lineTo(-width*.22, length*.78);
+  shape.lineTo(0, length);
+  shape.lineTo(width*.22, length*.78);
+  shape.lineTo(width*.34, .12);
+  shape.lineTo(width*.55, -.18);
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth:.035, bevelEnabled:true, bevelSegments:1, bevelSize:.009, bevelThickness:.009
+  });
+  const mesh = addMesh(geometry, material);
+  mesh.position.z = -.015;
+  return mesh;
+}
+const minuteHand = new THREE.Group();
+minuteHand.position.set(dialX, dialY, .21);
+scene.add(minuteHand);
+minuteHand.add(handMesh(.91, .095, darkBrass));
+const secondHand = new THREE.Group();
+secondHand.position.set(dialX, dialY, .29);
+scene.add(secondHand);
+secondHand.add(handMesh(1.20, .039, redLacquer));
+const tailWeight = addMesh(new THREE.CircleGeometry(.075, 32), redLacquer, secondHand);
+tailWeight.position.set(0, -.12, .035);
+const handPin = cylinderZ(.105, .16, paleGold);
+handPin.position.set(dialX, dialY, .37);
+const handPinCore = cylinderZ(.038, .17, blueSteel);
+handPinCore.position.set(dialX, dialY, .47);
+
+// Otto ruote dentate in presa, con distanze di centro pari alla somma dei raggi primitivi.
+const toothCounts = [60, 18, 24, 18, 24, 18, 24, 30];
+const moduleSize = .06;
+const gearY = -.60;
+const gearSpan = toothCounts.slice(0,-1).reduce(
+  (sum, n, i) => sum + moduleSize*(n+toothCounts[i+1])/2, 0
+);
+const gearXs = [-gearSpan/2];
+for (let i=1; i<toothCounts.length; i++) {
+  gearXs.push(gearXs[i-1] + moduleSize*(toothCounts[i-1]+toothCounts[i])/2);
+}
+function gearGeometry(teeth, mod) {
+  const pitch = mod*teeth/2;
+  const root = pitch - 1.25*mod;
+  const tip = pitch + mod;
+  const step = TAU/teeth;
+  const shape = new THREE.Shape();
+  let first = true;
+  const profile = [[-.5,root],[-.34,root],[-.21,tip],[.21,tip],[.34,root],[.5,root]];
+  for (let i=0; i<teeth; i++) {
+    for (const [fraction, radius] of profile) {
+      const a = (i+fraction)*step;
+      const x = Math.cos(a)*radius, y = Math.sin(a)*radius;
+      if (first) { shape.moveTo(x,y); first=false; }
+      else shape.lineTo(x,y);
+    }
+  }
+  shape.closePath();
+  const holeRadius = Math.max(.14, pitch*.29);
+  const hole = new THREE.Path();
+  hole.absarc(0,0,holeRadius,0,TAU,true);
+  shape.holes.push(hole);
+  return {geometry:new THREE.ExtrudeGeometry(shape,{
+    depth:.16, bevelEnabled:true, bevelSegments:1, bevelSize:.018, bevelThickness:.018
+  }), pitch, root, holeRadius};
+}
+const gearMats = [brass, steel, copper, blueSteel, paleGold, steel, copper, paleGold];
+const gears = [];
+const gearPhases = [];
+for (let i=0; i<toothCounts.length; i++) {
+  const teeth = toothCounts[i];
+  const {geometry,pitch,root,holeRadius} = gearGeometry(teeth,moduleSize);
+  const group = new THREE.Group();
+  group.position.set(gearXs[i], gearY, .02);
+  scene.add(group);
+  const face = addMesh(geometry, gearMats[i], group);
+  face.position.z = -.08;
+
+  const spokeMaterial = i%2===0 ? darkBrass : darkMetal;
+  const inner = holeRadius*.78;
+  const outer = root*.82;
+  for (let s=0; s<4; s++) {
+    const a = s*Math.PI/2;
+    const length = outer-inner;
+    const spoke = box(length, .075, .07, spokeMaterial, group);
+    spoke.position.set(Math.cos(a)*(inner+outer)/2, Math.sin(a)*(inner+outer)/2, .105);
+    spoke.rotation.z = a;
+  }
+  const hub = cylinderZ(holeRadius*.70, .15, gearMats[i], 40, group);
+  hub.position.z = .12;
+  const hubRim = torus(holeRadius*.57, .025, paleGold, group);
+  hubRim.position.z = .205;
+  const bearing = torus(Math.max(.18,pitch*.32), .04, darkBrass);
+  bearing.position.set(gearXs[i], gearY, -.77);
+  const bearingWell = addMesh(new THREE.CircleGeometry(Math.max(.13,pitch*.25), 48), darkMetal);
+  bearingWell.position.set(gearXs[i], gearY, -.73);
+  const phase = i===0 ? 0 : (i%2 ? Math.PI-(TAU/teeth)/2 : Math.PI);
+  gearPhases.push(phase);
+  gears.push({group, teeth, pitch});
+  const outerRadius = pitch+moduleSize;
+  textSprite(`${teeth}T`, gearXs[i], gearY-outerRadius-.20, .15, '#cbb17a', 'Georgia');
+}
+const springBadge = box(.66, .42, .08, darkBrass);
+springBadge.position.set(gearXs[0], gearY, -.80);
+const springInset = box(.57, .33, .035, darkMetal);
+springInset.position.set(gearXs[0], gearY, -.74);
+const springRing = torus(.19, .035, paleGold);
+springRing.position.set(gearXs[0], gearY, -.67);
+const springCore = cylinderZ(.10, .08, copper, 32);
+springCore.position.set(gearXs[0], gearY, -.64);
+
+// Il pendolo muove l'ancora; l'ultima ruota avanza di un dente a ogni battito.
+const escapeX = gearXs[7];
+const escapeY = gearY;
+const anchorY = escapeY + 1.18;
+const escapement = new THREE.Group();
+escapement.position.set(escapeX, anchorY, .42);
+scene.add(escapement);
+staticBar(escapement, -.78,-.40, .78,-.40, .105,.10, brass, 0);
+staticBar(escapement, -.05,-.04, -.78,-.40, .095,.09, paleGold, .015);
+staticBar(escapement, .05,-.04, .78,-.40, .095,.09, paleGold, .015);
+for (const side of [-1,1]) {
+  const pallet = box(.38,.15,.13,steel,escapement);
+  pallet.position.set(side*.79,-.40,.075);
+  pallet.rotation.z = side*.52;
+  const jewel = addMesh(new THREE.CircleGeometry(.055,24),redLacquer,escapement);
+  jewel.position.set(side*.79,-.40,.15);
+}
+const anchorCap = cylinderZ(.18,.16,paleGold,40,escapement);
+anchorCap.position.z=.13;
+const anchorScrew = cylinderZ(.065,.18,blueSteel,32,escapement);
+anchorScrew.position.z=.23;
+
+const pendulumLength = 3.0;
+const pendulumRod = box(.065,pendulumLength,.10,steel,escapement);
+pendulumRod.position.set(0,-pendulumLength/2,-.50);
+const rodInlay = box(.018,pendulumLength*.88,.025,paleGold,escapement);
+rodInlay.position.set(0,-pendulumLength/2,-.435);
+const bob = addMesh(new THREE.SphereGeometry(1,48,32),copper,escapement);
+bob.position.set(0,-pendulumLength,-.48);
+bob.scale.set(.37,.43,.26);
+const bobBand = torus(.30,.035,paleGold,escapement);
+bobBand.position.set(0,-pendulumLength,-.20);
+const bobPin = cylinderZ(.09,.18,steel,32,escapement);
+bobPin.position.set(0,-pendulumLength-.05,-.18);
+
+// Cam ellittica, pattino verticale e biella del piccolo suonatore.
+const camX = 6.48, camY = -1.37;
+const camGroup = new THREE.Group();
+camGroup.position.set(camX,camY,.35);
+scene.add(camGroup);
+const camShape = new THREE.Shape();
+for (let i=0; i<=72; i++) {
+  const a=i/72*TAU;
+  const r=.235+.11*Math.cos(a);
+  const x=Math.cos(a)*r, y=Math.sin(a)*r;
+  if (i===0) camShape.moveTo(x,y); else camShape.lineTo(x,y);
+}
+camShape.closePath();
+const camHole = new THREE.Path();
+camHole.absarc(0,0,.09,0,TAU,true);
+camShape.holes.push(camHole);
+const camMesh = addMesh(new THREE.ExtrudeGeometry(camShape,{
+  depth:.16, bevelEnabled:true, bevelSegments:2, bevelSize:.018, bevelThickness:.018
+}),copper,camGroup);
+camMesh.position.z=-.08;
+const camRim = torus(.18,.022,paleGold,camGroup);
+camRim.position.z=.10;
+const camAxle = cylinderZ(.075,.18,steel,32,camGroup);
+camAxle.position.z=.12;
+for (const x of [camX-.18,camX+.18]) {
+  const guide = box(.045,1.32,.09,steel);
+  guide.position.set(x,-.08,.70);
+}
+const guideFoot = box(.52,.075,.12,darkBrass);
+guideFoot.position.set(camX,-.67,.71);
+const followerLength = 1.30;
+const follower = box(.09,1,.09,paleGold);
+const followerRoller = cylinderZ(.105,.13,steel,40);
+const followerLink = box(1,.075,.10,blueSteel);
+const followerTopPin = cylinderZ(.075,.13,paleGold,32);
+
+const figure = new THREE.Group();
+figure.position.set(6.02,1.05,1.06);
+scene.add(figure);
+const body = box(.40,.52,.25,blueSteel,figure);
+body.position.set(0,0,0);
+const coat = box(.46,.10,.27,copper,figure);
+coat.position.set(0,-.08,.02);
+const head = addMesh(new THREE.SphereGeometry(.245,32,24),paleGold,figure);
+head.position.set(-.02,.43,.03);
+const face = addMesh(new THREE.SphereGeometry(.178,32,24),ivory,figure);
+face.position.set(-.02,.42,.15);
+for (const ex of [-.075,.055]) {
+  const eye = addMesh(new THREE.SphereGeometry(.025,16,12),darkMetal,figure);
+  eye.position.set(ex,.45,.31);
+}
+const cap = addMesh(new THREE.CylinderGeometry(.16,.22,.10,32),darkBrass,figure);
+cap.rotation.x=Math.PI/2;
+cap.position.set(-.02,.65,.04);
+const capButton = addMesh(new THREE.SphereGeometry(.06,20,16),glowGold,figure);
+capButton.position.set(-.02,.72,.06);
+staticBar(figure,-.13,-.28,-.20,-.56,.085,.09,steel,0);
+staticBar(figure,.13,-.28,.20,-.56,.085,.09,steel,0);
+const footL=box(.22,.09,.14,darkBrass,figure); footL.position.set(-.20,-.57,.04);
+const footR=box(.22,.09,.14,darkBrass,figure); footR.position.set(.20,-.57,.04);
+
+const pivotX=6.65, pivotY=1.05;
+const rocker = new THREE.Group();
+rocker.position.set(pivotX,pivotY,1.38);
+scene.add(rocker);
+staticBar(rocker,0,0,1.50,0,.105,.12,darkBrass,0);
+staticBar(rocker,0,0,-.25,-.55,.09,.11,steel,.01);
+const hammerHead = cylinderZ(.145,.24,paleGold,40,rocker);
+hammerHead.position.set(1.48,0,.04);
+const hammerCap = cylinderZ(.075,.245,copper,32,rocker);
+hammerCap.position.set(1.48,0,.05);
+const rockerPivot = cylinderZ(.19,.20,paleGold,40,rocker);
+rockerPivot.position.z=.10;
+const rockerPin = cylinderZ(.065,.22,blueSteel,32,rocker);
+rockerPin.position.z=.18;
+const pivotRosette = torus(.25,.025,darkBrass,rocker);
+pivotRosette.position.z=.04;
+
+const bellX=7.85, bellY=2.40;
+const bellProfile = [
+  new THREE.Vector2(0,.40), new THREE.Vector2(.12,.40),
+  new THREE.Vector2(.17,.31), new THREE.Vector2(.24,.12),
+  new THREE.Vector2(.39,-.10), new THREE.Vector2(.46,-.22),
+  new THREE.Vector2(.43,-.20), new THREE.Vector2(.35,-.07),
+  new THREE.Vector2(.26,.13), new THREE.Vector2(.15,.30),
+  new THREE.Vector2(0,.30)
+];
+const bell = addMesh(new THREE.LatheGeometry(bellProfile,64),glowGold);
+bell.position.set(bellX,bellY,1.05);
+const bellRim = torus(.445,.035,paleGold);
+bellRim.position.set(bellX,bellY-.205,1.08);
+const bellCrown = cylinderZ(.14,.18,darkBrass,32);
+bellCrown.position.set(bellX,bellY+.39,1.08);
+const bellSupport = box(.12,.46,.16,darkBrass);
+bellSupport.position.set(bellX,bellY+.61,.93);
+const bellCrossbar = box(1.05,.10,.16,paleGold);
+bellCrossbar.position.set(bellX,bellY+.82,.91);
+for (const x of [bellX-.46,bellX+.46]) {
+  const hanger=box(.08,.40,.13,steel);
+  hanger.position.set(x,bellY+.62,.89);
+}
+const clapper = new THREE.Group();
+clapper.position.set(bellX,bellY+.12,1.28);
+scene.add(clapper);
+staticBar(clapper,0,0,0,-.31,.045,.05,steel,0);
+const clapperBall = addMesh(new THREE.SphereGeometry(.10,24,20),copper,clapper);
+clapperBall.position.set(0,-.34,.02);
+
+const linkage = box(1,.075,.10,blueSteel);
+const beatDot = document.querySelector('.beat-dot');
+const clockStart = performance.now();
+function smooth01(x) {
+  x=Math.max(0,Math.min(1,x));
+  return x*x*(3-2*x);
+}
+function animate(now) {
+  requestAnimationFrame(animate);
+  const elapsed=(now-clockStart)/1000;
+  const masterAngle=elapsed*TAU/60;
+  const seconds=masterAngle*60/TAU;
+  const tickIndex=Math.floor(seconds);
+  const tickPhase=seconds-tickIndex;
+  const releasedSeconds=tickIndex+smooth01(tickPhase/.12);
+  const driveAngle=releasedSeconds*TAU/60;
+
+  let wheelAngle=driveAngle;
+  for (let i=0; i<gears.length; i++) {
+    if (i>0) wheelAngle=-wheelAngle*gears[i-1].teeth/gears[i].teeth;
+    gears[i].group.rotation.z=gearPhases[i]+wheelAngle;
+  }
+  secondHand.rotation.z=-driveAngle;
+  minuteHand.rotation.z=-driveAngle/60;
+
+  const pendulumAngle=.235*Math.sin(masterAngle*30);
+  escapement.rotation.z=pendulumAngle;
+  const camAngle=masterAngle*60-Math.PI/2;
+  camGroup.rotation.z=camAngle;
+  const camLift=.11*(1+Math.sin(camAngle));
+  const rollerY=camY+.235+.11*Math.sin(camAngle)+.105;
+  const followerTop=rollerY+followerLength;
+  follower.position.set(camX,(rollerY+followerTop)/2,.78);
+  follower.scale.y=followerLength;
+  followerRoller.position.set(camX,rollerY,.79);
+  followerTopPin.position.set(camX,followerTop,.86);
+
+  const cock=Math.max(0,Math.min(1,camLift/.22));
+  const hammerAngle=.66+cock*.42;
+  rocker.rotation.z=hammerAngle;
+  const tailX=pivotX+(-.25*Math.cos(hammerAngle)+.55*Math.sin(hammerAngle));
+  const tailY=pivotY+(-.25*Math.sin(hammerAngle)-.55*Math.cos(hammerAngle));
+  positionBar(linkage,camX,followerTop,tailX,tailY,1.15);
+  clapper.rotation.z=.13*Math.sin(masterAngle*120-.4);
+
+  const flash=Math.max(0,1-tickPhase/.16);
+  beatDot.style.opacity=String(.38+.62*flash);
+  beatDot.style.transform=`scale(${1+flash*.65})`;
+
+  camera.position.set(Math.sin(elapsed*.13)*.16,Math.cos(elapsed*.11)*.10,26);
+  camera.lookAt(0,0,0);
+  renderer.render(scene,camera);
+}
+function resize() {
+  const aspect=window.innerWidth/window.innerHeight;
+  const width=Math.max(17.8,aspect*10.0);
+  const height=width/aspect;
+  camera.left=-width/2;
+  camera.right=width/2;
+  camera.top=height/2;
+  camera.bottom=-height/2;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.8));
+  renderer.setSize(window.innerWidth,window.innerHeight);
+}
+window.addEventListener('resize',resize);
+resize();
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

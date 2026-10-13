@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Opens an HTML in headless WebKit, records 7 s of video and runs the automatic checks. Usage: render.py file.html out_dir -> JSON on stdout."""
+"""Opens an HTML in headless WebKit, records 10 s of video and runs the automatic checks. Usage: render.py file.html out_dir -> JSON on stdout."""
 import sys, json, subprocess, hashlib, shutil, pathlib, time
 from playwright.sync_api import sync_playwright
 
 html = pathlib.Path(sys.argv[1]).resolve(); out = pathlib.Path(sys.argv[2]); out.mkdir(parents=True, exist_ok=True)
 vendor = pathlib.Path(__file__).parent / "vendor" / "three.module.js"
-W, H, SECS = 640, 400, 7.0
+W, H, SECS = 640, 400, 10.0
 
 def gray(png):
     r = subprocess.run(["ffmpeg", "-v", "error", "-i", str(png), "-vf", "scale=48:30", "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture_output=True)
@@ -24,7 +24,7 @@ with sync_playwright() as p:
         page.route("**/three.module*.js", serve_three)
         page.goto(html.as_uri(), wait_until="load", timeout=20000)
         t0 = time.time()
-        for i, t in enumerate([1.5, 3.0, 4.5, 6.0]):
+        for i, t in enumerate([2.0, 4.0, 6.0, 8.0]):
             page.wait_for_timeout(max(0, int((t - (time.time() - t0)) * 1000)))
             f = out / f"shot{i}.png"; page.screenshot(path=str(f)); shots.append(f)
         page.wait_for_timeout(max(0, int((SECS - (time.time() - t0)) * 1000)))

@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clockwork Automaton</title>
+<style>
+    body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #050302;
+        font-family: sans-serif;
+    }
+    canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+    }
+</style>
+</head>
+<body>
+
+<script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+    // --- SCENE, CAMERA, RENDERER ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0604);
+    scene.fog = new THREE.FogExp2(0x0a0604, 0.035);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 0, 14);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    // --- LIGHTING ---
+    const ambientLight = new THREE.AmbientLight(0x221810, 2.0);
+    scene.add(ambientLight);
+
+    const keyLight = new THREE.DirectionalLight(0xffeedd, 3.5);
+    keyLight.position.set(5, 8, 6);
+    keyLight.castShadow = true;
+    keyLight.shadow.mapSize.width = 2048;
+    keyLight.shadow.mapSize.height = 2048;
+    keyLight.shadow.bias = -0.0005;
+    scene.add(keyLight);
+
+    const fillLight = new THREE.DirectionalLight(0x88bbff, 1.2);
+    fillLight.position.set(-6, -2, 4);
+    scene.add(fillLight);
+
+    const warmRim = new THREE.PointLight(0xffaa44, 4, 10);
+    warmRim.position.set(0, 2, -3);
+    scene.add(warmRim);
+
+    // --- MATERIALS ---
+    const brassMat = new THREE.MeshStandardMaterial({
+        color: 0xcca844,
+        metalness: 0.9,
+        roughness: 0.25,
+        wireframe: false
+    });
+
+    const darkBrassMat = new THREE.MeshStandardMaterial({
+        color: 0x886622,
+        metalness: 0.85,
+        roughness: 0.35
+    });
+
+    const steelMat = new THREE.MeshStandardMaterial({
+        color: 0xcccccc,
+        metalness: 0.95,
+        roughness: 0.2
+    });
+
+    const copperMat = new THREE.MeshStandardMaterial({
+        color: 0xcc6633,
+        metalness: 0.9,
+        roughness: 0.3
+    });
+
+    const woodMat = new THREE.MeshStandardMaterial({
+        color: 0x24140a,
+        roughness: 0.7,
+        metalness: 0.1
+    });
+
+    const whiteEnamel = new THREE.MeshStandardMaterial({
+        color: 0xf5f2eb,
+        roughness: 0.1,
+        metalness: 0.1
+    });
+
+    const blackPaint = new THREE.MeshStandardMaterial({
+        color: 0x111111,
+        roughness: 0.5,
+        metalness: 0.2
+    });
+
+    // --- PROCEDURAL GEOMETRY GENERATORS ---
+
+    // Creates a gear shape matching tooth count
+    function createGearShape(teeth, outerRadius) {
+        const shape = new THREE.Shape();
+        const rootRadius = outerRadius * 0.82;
+        const toothDepth = outerRadius - rootRadius;
+        
+        for (let i = 0; i < teeth; i++) {
+            const theta = (i / teeth) * Math.PI * 2;
+            const dt = Math.PI * 2 / teeth;
+            
+            const a1 = theta - dt * 0.35;
+            const a2 = theta - dt * 0.15;
+            const a3 = theta + dt * 0.15;
+            const a4 = theta + dt * 0.35;
+            
+            if (i === 0) {
+                shape.moveTo(Math.cos(a1) * rootRadius, Math.sin(a1) * rootRadius);
+            }
+            shape.lineTo(Math.cos(a2) * outerRadius, Math.sin(a2) * outerRadius);
+            shape.lineTo(Math.cos(a3) * outerRadius, Math.sin(a3) * outerRadius);
+            shape.lineTo(Math.cos(a4) * rootRadius, Math.sin(a4) * rootRadius);
+            
+            const nextTheta = ((i + 1) / teeth) * Math.PI * 2;
+            const nextA1 = nextTheta - dt * 0.35;
+            shape.lineTo(Math.cos(nextA1) * rootRadius, Math.sin(nextA1) * rootRadius);
+        }
+        return shape;
+    }
+
+    function createGearMesh(teeth, outerRadius, thickness, material) {
+        const shape = createGearShape(teeth, outerRadius);
+        
+        // Add center hole
+        const holePath = new THREE.Path();
+        const holeRadius = outerRadius * 0.2;
+        holePath.absarc(0, 0, holeRadius, 0, Math.PI * 2, true);
+        shape.holes.push(holePath);
+
+        // Add weight-reduction spokes holes if gear is large enough
+        if (outerRadius > 0.8 && teeth > 12) {
+            const numSpokes = 4;
+            for (let i = 0; i < numSpokes; i++) {
+                const angle = (i / numSpokes) * Math.PI * 2;
+                const dist = outerRadius * 0.5;
+                const spokePath = new THREE.Path();
+                spokePath.absarc(Math.cos(angle) * dist, Math.sin(angle) * dist, outerRadius * 0.18, 0, Math.PI * 2, true);
+                shape.holes.push(spokePath);
+            }
+        }
+
+        const extrudeSettings = {
+            depth: thickness,
+            bevelEnabled: true,
+            bevelSegments: 2,
+            steps: 1,
+            bevelSize: 0.02,
+            bevelThickness: 0.02
+        };
+
+        const geom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        geom.center();
+        const mesh = new THREE.Mesh(geom, material);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        return mesh;
+    }
+
+    // --- ASSEMBLE CLOCKWORK STRUCTURE ---
+
+    const masterGroup = new THREE.Group();
+    scene.add(masterGroup);
+
+    // Base plate (Backboard)
+    const plateGeom = new THREE.BoxGeometry(7.5, 6.5, 0.4);
+    const plate = new THREE.Mesh(plateGeom, woodMat);
+    plate.position.z = -1.2;
+    plate.receiveShadow = true;
+    masterGroup.add(plate);
+
+    // Brass pillars connecting plates (visual depth)
+    for (let x of [-3.3, 3.3]) {
+        for (let y of [-2.8, 2.8]) {
+            const pillarGeom = new THREE.CylinderGeometry(0.1, 0.1, 2.2, 16);
+            pillarGeom.rotateX(Math.PI / 2);
+            const pillar = new THREE.Mesh(pillarGeom, darkBrassMat);
+            pillar.position.set(x, y, -0.4);
+            masterGroup.add(pillar);
+        }
+    }
+
+    // --- GEAR TRAIN SETUP ---
+    // Gear ratios and properties (8 gears in main train)
+    // Master angle drives Gear 1.
+    // Gear 1: 60 teeth, radius 1.8, pos (0, 0)
+    // Gear 2: 20 teeth, radius 0.6, pos (2.4, 0) - meshes with G1 (Ratio 3:1)
+    // Gear 3: 40 teeth, radius 1.2, pos (2.4, 0) - coaxial with G2
+    // Gear 4: 15 teeth, radius 0.45, pos (3.6, 1.2) - meshes with G3
+    // Gear 5: 30 teeth, radius 0.9, pos (3.6, 1.2) - coaxial with G4
+    // Gear 6: 12 teeth, radius 0.36, pos (2.5, 2.2) - meshes with G5
+    // Gear 7: 24 teeth, radius 0.72, pos (2.5, 2.2) - coaxial with G6
+    // Gear 8 (Escape Wheel): 15 teeth, radius 0.6, pos (0.8, 2.4) - meshes with G7
+
+    const gearGroup = new THREE.Group();
+    gearGroup.position.z = -0.8;
+    masterGroup.add(gearGroup);
+
+    // Create Gear Meshes
+    const g1 = createGearMesh(60, 1.8, 0.12, brassMat);
+    g1.position.set(0, 0, 0);
+    gearGroup.add(g1);
+
+    const g2 = createGearMesh(20, 0.6, 0.12, darkBrassMat);
+    g2.position.set(2.4, 0, 0.08);
+    gearGroup.add(g2);
+
+    const g3 = createGearMesh(40, 1.2, 0.1, brassMat);
+    g3.position.set(2.4, 0, 0.18);
+    gearGroup.add(g3);
+
+    const g4 = createGearMesh(15, 0.45, 0.1, steelMat);
+    g4.position.set(3.6, 1.2, 0.26);
+    gearGroup.add(g4);
+
+    const g5 = createGearMesh(30, 0.9, 0.1, brassMat);
+    g5.position.set(3.6, 1.2, 0.36);
+    gearGroup.add(g5);
+
+    const g6 = createGearMesh(12, 0.36, 0.1, steelMat);
+    g6.position.set(2.5, 2.2, 0.44);
+    gearGroup.add(g6);
+
+    const g7 = createGearMesh(24, 0.72, 0.1, copperMat);
+    g7.position.set(2.5, 2.2, 0.54);
+    gearGroup.add(g7);
+
+    // Escape Wheel (Special teeth shape)
+    const escapeWheelGroup = new THREE.Group();
+    escapeWheelGroup.position.set(0.8, 2.4, 0.64);
+    
+    // Build specialized escape wheel geometry
+    const escShape = new THREE.Shape();
+    const escTeeth = 15;
+    const escRadius = 0.65;
+    for(let i=0; i<escTeeth; i++) {
+        const a = (i/escTeeth) * Math.PI * 2;
+        const da = Math.PI * 2 / escTeeth;
+        escShape.moveTo(Math.cos(a)*0.2, Math.sin(a)*0.2);
+        escShape.lineTo(Math.cos(a - da*0.4)*escRadius*0.5, Math.sin(a - da*0.4)*escRadius*0.5);
+        escShape.lineTo(Math.cos(a)*escRadius, Math.sin(a)*escRadius);
+    }
+    const escGeom = new THREE.ExtrudeGeometry(escShape, {depth: 0.08, bevelEnabled: false});
+    escGeom.center();
+    const escapeWheelMesh = new THREE.Mesh(escGeom, steelMat);
+    escapeWheelGroup.add(escapeWheelMesh);
+    gearGroup.add(escapeWheelGroup);
+
+    // --- ANCHOR ESCAPEMENT & PENDULUM ---
+    const escapementGroup = new THREE.Group();
+    escapementGroup.position.set(0.8, 3.5, 0.8);
+    masterGroup.add(escapementGroup);
+
+    // Anchor rod & pallets
+    const anchorShape = new THREE.Shape();
+    anchorShape.moveTo(-0.1, 0);
+    anchorShape.lineTo(0.1, 0);
+    anchorShape.lineTo(0.7, 0.9);
+    anchorShape.lineTo(0.5, 1.1);
+    anchorShape.lineTo(-0.5, 1.1);
+    anchorShape.lineTo(-0.7, 0.9);
+    anchorShape.closePath();
+    const anchorGeom = new THREE.ExtrudeGeometry(anchorShape, {depth: 0.12, bevelEnabled:true, bevelSize:0.01, bevelThickness:0.01});
+    anchorGeom.center();
+    const anchorMesh = new THREE.Mesh(anchorGeom, steelMat);
+    escapementGroup.add(anchorMesh);
+
+    // Pendulum Rod & Bob
+    const pendulumGroup = new THREE.Group();
+    pendulumGroup.position.set(0, 0.5, 0);
+    escapementGroup.add(pendulumGroup);
+
+    const rodGeom = new THREE.CylinderGeometry(0.03, 0.03, 3.8, 8);
+    const rodMesh = new THREE.Mesh(rodGeom, brassMat);
+    rodMesh.position.y = -1.9;
+    pendulumGroup.add(rodMesh);
+
+    const bobGeom = new THREE.CylinderGeometry(0.5, 0.5, 0.2, 32);
+    bobGeom.rotateX(Math.PI / 2);
+    const bobMesh = new THREE.Mesh(bobGeom, brassMat);
+    bobMesh.position.y = -3.5;
+    bobMesh.castShadow = true;
+    pendulumGroup.add(bobMesh);
+
+
+    // --- DIAL & HANDS (Front Layer) ---
+    const dialGroup = new THREE.Group();
+    dialGroup.position.set(-2.2, -0.2, 0.5);
+    masterGroup.add(dialGroup);
+
+    // Dial background face
+    const dialFaceGeom = new THREE.CylinderGeometry(1.8, 1.8, 0.1, 32);
+    dialFaceGeom.rotateX(Math.PI / 2);
+    const dialFace = new THREE.Mesh(dialFaceGeom, whiteEnamel);
+    dialFace.receiveShadow = true;
+    dialGroup.add(dialFace);
+
+    // Bezel rim
+    const bezelGeom = new THREE.TorusGeometry(1.8, 0.06, 16, 48);
+    bezelGeom.rotateX(Math.PI / 2);
+    const bezel = new THREE.Mesh(bezelGeom, brassMat);
+    dialGroup.add(bezel);
+
+    // Hour Hand
+    const hourHandGroup = new THREE.Group();
+    hourHandGroup.position.z = 0.1;
+    dialGroup.add(hourHandGroup);
+    
+    const hourShape = new THREE.Shape();
+    hourShape.moveTo(-0.06, 0);
+    hourShape.lineTo(0.06, 0);
+    hourShape.lineTo(0.02, 1.1);
+    hourShape.lineTo(0, 1.25);
+    hourShape.lineTo(-0.02, 1.1);
+    hourShape.closePath();
+    const hourGeom = new THREE.ExtrudeGeometry(hourShape, {depth: 0.04, bevelEnabled:false});
+    hourGeom.center();
+    // Adjust center for rotation around base
+    hourGeom.translate(0, 0.625, 0);
+    const hourHand = new THREE.Mesh(hourGeom, blackPaint);
+    hourHandGroup.add(hourHand);
+
+    // Minute Hand (1:60 ratio relative to master/seconds)
+    const minHandGroup = new THREE.Group();
+    minHandGroup.position.z = 0.15;
+    dialGroup.add(minHandGroup);
+
+    const minShape = new THREE.Shape();
+    minShape.moveTo(-0.04, 0);
+    minShape.lineTo(0.04, 0);
+    minShape.lineTo(0.01, 1.5);
+    minShape.lineTo(0, 1.7);
+    minShape.lineTo(-0.01, 1.5);
+    minShape.closePath();
+    const minGeom = new THREE.ExtrudeGeometry(minShape, {depth: 0.04, bevelEnabled:false});
+    minGeom.center();
+    minGeom.translate(0, 0.85, 0);
+    const minHand = new THREE.Mesh(minGeom, blackPaint);
+    minHandGroup.add(minHand);
+
+    // Center pin
+    const pinGeom = new THREE.CylinderGeometry(0.08, 0.08, 0.25, 16);
+    pinGeom.rotateX(Math.PI / 2);
+    const pin = new THREE.Mesh(pinGeom, brassMat);
+    pin.position.z = 0.2;
+    dialGroup.add(pin);
+
+
+    // --- CAM & FOLLOWER (Automaton Mechanism) ---
+    // Driven by Gear 3 shaft (pos: 2.4, 0)
+    const automatonGroup = new THREE.Group();
+    automatonGroup.position.set(2.4, 0, 0.8);
+    masterGroup.add(automatonGroup);
+
+    // Cam (mounted on coaxial layer with G3)
+    const camShape = new THREE.Shape();
+    const camSteps = 60;
+    for(let i=0; i<camSteps; i++) {
+        const a = (i/camSteps) * Math.PI * 2;
+        // Snail drop cam profile with rapid fall
+        const r = 0.3 + 0.25 * Math.pow((1 + Math.sin(a - Math.PI/2))/2, 0.3);
+        if(i===0) camShape.moveTo(Math.cos(a)*r, Math.sin(a)*r);
+        else camShape.lineTo(Math.cos(a)*r, Math.sin(a)*r);
+    }
+    const camGeom = new THREE.ExtrudeGeometry(camShape, {depth: 0.15, bevelEnabled:false});
+    camGeom.center();
+    const camMesh = new THREE.Mesh(camGeom, copperMat);
+    automatonGroup.add(camMesh);
+
+    // Follower Lever & Hammer
+    const followerGroup = new THREE.Group();
+    followerGroup.position.set(0.6, 0.8, 0);
+    automatonGroup.add(followerGroup);
+
+    const leverShape = new THREE.Shape();
+    leverShape.moveTo(-0.08, -0.2);
+    leverShape.lineTo(0.08, -0.2);
+    leverShape.lineTo(0.05, 1.2);
+    leverShape.lineTo(-0.05, 1.2);
+    leverShape.closePath();
+    const leverGeom = new THREE.ExtrudeGeometry(leverShape, {depth: 0.08, bevelEnabled:false});
+    leverGeom.center();
+    leverGeom.translate(0, 0.5, 0);
+    const leverMesh = new THREE.Mesh(leverGeom, steelMat);
+    followerGroup.add(leverMesh);
+
+    // Hammer head
+    const hammerGeom = new THREE.SphereGeometry(0.18, 16, 16);
+    const hammerMesh = new THREE.Mesh(hammerGeom, brassMat);
+    hammerMesh.position.set(0, 1.2, 0.1);
+    hammerMesh.castShadow = true;
+    followerGroup.add(hammerMesh);
+
+    // Bell target
+    const bellGroup = new THREE.Group();
+    bellGroup.position.set(2.4, 1.6, 0.6);
+    masterGroup.add(bellGroup);
+
+    const bellGeom = new THREE.SphereGeometry(0.45, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.7);
+    const bellMesh = new THREE.Mesh(bellGeom, brassMat);
+    bellMesh.castShadow = true;
+    bellGroup.add(bellMesh);
+
+    const bellBaseGeom = new THREE.CylinderGeometry(0.1, 0.1, 0.3, 16);
+    const bellBase = new THREE.Mesh(bellBaseGeom, steelMat);
+    bellBase.position.y = -0.2;
+    bellGroup.add(bellBase);
+
+
+    // --- ANIMATION & PHYSICS LOOP ---
+    let clock = new THREE.Clock();
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        let t = clock.getElapsedTime();
+
+        // Master angle derivation (continuous smooth rotation powering the train)
+        let masterAngle = t * 1.2;
+
+        // Gear Train rotations with precise alternating signs (opposite rotation per gear mesh)
+        // G1 (Master)
+        g1.rotation.z = masterAngle;
+        
+        // G2 & G3 (Coaxial with G1, ratio 60:20 = 3:1)
+        const g2Angle = -masterAngle * 3.0;
+        g2.rotation.z = g2Angle;
+        g3.rotation.z = g2Angle;
+
+        // G4 & G5 (Ratio with G3: 40:15 = 2.666:1)
+        const g4Angle = -g2Angle * (40 / 15);
+        g4.rotation.z = g4Angle;
+        g5.rotation.z = g4Angle;
+
+        // G6 & G7 (Ratio with G5: 30:12 = 2.5:1)
+        const g6Angle = -g4Angle * (30 / 12);
+        g6.rotation.z = g6Angle;
+        g7.rotation.z = g6Angle;
+
+        // Escape Wheel (Ratio with G7: 24:15 = 1.6:1)
+        const escapeAngle = -g6Angle * (24 / 15);
+        escapeWheelGroup.rotation.z = escapeAngle;
+
+        // Anchor Escapement ticks synchronously with escape wheel teeth pass
+        // 15 teeth means frequency linked to escape angle
+        let tickCycle = (escapeAngle * 15) % (Math.PI * 2);
+        let anchorSwing = Math.sin(escapeAngle * 15) * 0.15;
+        escapementGroup.rotation.z = anchorSwing;
+
+        // Pendulum swings proportionally driven by anchor feedback
+        pendulumGroup.rotation.z = Math.sin(t * 4.5) * 0.22;
+
+        // Dial hands: Second hand tracks master, Minute hand tracks 1:60 ratio
+        let secondAngle = -masterAngle;
+        let minuteAngle = -masterAngle / 60.0;
+        
+        minHandGroup.rotation.z = minuteAngle;
+        hourHandGroup.rotation.z = minuteAngle * 0.0833; // 12-hour ratio
+
+        // Cam and Follower (Automaton Strike)
+        // Cam rotates with G3/G2 assembly
+        camMesh.rotation.z = g2Angle;
+        
+        // Follower tracking snail cam drop profile
+        // Compute local cam follower angle relative to cam
+        let camRot = g2Angle % (Math.PI * 2);
+        if(camRot < 0) camRot += Math.PI * 2;
+        
+        // Snail cam drop calculation matching profile formula
+        let dropFactor = Math.pow((1 + Math.sin(camRot - Math.PI/2))/2, 0.3);
+        let followerRot = (1.0 - dropFactor) * 0.35;
+        
+        // Add a tiny bounce when hammer hits the bell at drop point
+        if(dropFactor < 0.05) {
+            followerRot += Math.sin(t * 40) * 0.04 * (1.0 - dropFactor*20);
+        }
+        
+        followerGroup.rotation.z = followerRot;
+
+        // Subtle cinematic camera drift
+        camera.position.x = Math.sin(t * 0.2) * 0.4;
+        camera.position.y = Math.cos(t * 0.15) * 0.3;
+        camera.lookAt(0, 0, 0);
+
+        renderer.render(scene, camera);
+    }
+
+    animate();
+
+    // --- RESPONSIVE WINDOW RESIZE ---
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+</script>
+</body>
+</html>

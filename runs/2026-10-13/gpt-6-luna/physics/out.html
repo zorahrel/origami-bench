@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Chain Reaction</title>
+<style>
+:root{color-scheme:dark;--progress:0%}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0b1220;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+canvas{position:fixed;inset:0;display:block;width:100%;height:100%}
+.hud{position:fixed;inset:0;pointer-events:none;color:#f6f3e9}
+.top{position:absolute;top:clamp(20px,4vh,40px);left:clamp(20px,5vw,68px);right:clamp(20px,5vw,68px);display:flex;justify-content:space-between;align-items:flex-start}
+.eyebrow{font-size:10px;font-weight:800;letter-spacing:.25em;text-transform:uppercase;color:#ffb66e}
+h1{margin:8px 0 0;font-size:clamp(23px,3vw,38px);line-height:1;letter-spacing:-.045em;font-weight:760}
+.subtitle{margin:9px 0 0;color:#aab7c6;font-size:12px;letter-spacing:.035em}
+.clock{padding:10px 14px;border:1px solid #ffffff22;border-radius:99px;background:#0c1625b8;color:#d7e1e7;font-size:11px;font-variant-numeric:tabular-nums;letter-spacing:.1em;backdrop-filter:blur(12px)}
+.progress{position:absolute;top:0;left:0;width:var(--progress);height:3px;background:linear-gradient(90deg,#ff9d54,#f6d76b,#6be0c4);box-shadow:0 0 14px #ffb66e88;transition:width .08s linear}
+.bottom{position:absolute;left:clamp(20px,5vw,68px);right:clamp(20px,5vw,68px);bottom:clamp(20px,4vh,42px)}
+.stages{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.stage{position:relative;min-height:64px;padding:12px 12px 11px 44px;border:1px solid #ffffff20;border-radius:12px;background:#0c1625c9;backdrop-filter:blur(12px);color:#92a1b2;transition:background .35s,border-color .35s,color .35s,transform .35s,box-shadow .35s}
+.stage-num{position:absolute;left:12px;top:12px;width:22px;height:22px;display:grid;place-items:center;border:1px solid #ffffff28;border-radius:50%;font-size:10px;font-weight:800;color:#a5b3c3;transition:all .35s}
+.stage-name{display:block;font-size:11px;font-weight:750;letter-spacing:.025em}
+.stage-hint{display:block;margin-top:4px;font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:#718195}
+.stage.active{transform:translateY(-3px);border-color:#ffc06a99;background:#202332e8;color:#fff4df;box-shadow:0 8px 30px #ffae4930,0 0 0 1px #ffbd6230}
+.stage.active .stage-num{border-color:#ffd27b;background:#ffc46a;color:#18202c;box-shadow:0 0 15px #ffc46a77}
+.stage.active .stage-hint{color:#ffc979}
+.caption{display:flex;justify-content:space-between;margin-top:12px;color:#718195;font-size:9px;letter-spacing:.15em;text-transform:uppercase}
+.caption span:last-child{color:#9aa8b8}
+@media(max-width:650px){
+ .top{top:20px}.subtitle{max-width:210px;line-height:1.45}
+ .stages{grid-template-columns:repeat(5,minmax(0,1fr));gap:5px}
+ .stage{min-height:58px;padding:10px 4px 8px;text-align:center}
+ .stage-num{position:static;width:19px;height:19px;margin:0 auto 5px;font-size:9px}
+ .stage-name{font-size:9px}.stage-hint{font-size:7px}
+ .caption{font-size:7px}
+}
+</style>
+</head>
+<body>
+<div class="hud">
+  <div class="progress"></div>
+  <header class="top">
+    <div>
+      <div class="eyebrow">A small machine with big plans</div>
+      <h1>Chain Reaction</h1>
+      <p class="subtitle">One nudge. Five stages. A very determined flag.</p>
+    </div>
+    <div class="clock" id="clock">RESET IN 10.5s</div>
+  </header>
+  <footer class="bottom">
+    <div class="stages" aria-label="Chain reaction stages">
+      <div class="stage" id="stage1"><span class="stage-num">1</span><span class="stage-name">Domino run</span><span class="stage-hint">The nudge</span></div>
+      <div class="stage" id="stage2"><span class="stage-num">2</span><span class="stage-name">Ramp ball</span><span class="stage-hint">Downhill</span></div>
+      <div class="stage" id="stage3"><span class="stage-num">3</span><span class="stage-name">Seesaw</span><span class="stage-hint">Up and away</span></div>
+      <div class="stage" id="stage4"><span class="stage-num">4</span><span class="stage-name">Block tower</span><span class="stage-hint">Timber</span></div>
+      <div class="stage" id="stage5"><span class="stage-num">5</span><span class="stage-name">Raise the flag</span><span class="stage-hint">Success</span></div>
+    </div>
+    <div class="caption"><span>Hand-built motion · No physics engine</span><span>Loops every 10.5 seconds</span></div>
+  </footer>
+</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1220);
+scene.fog = new THREE.Fog(0x0b1220, 31, 58);
+
+const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(-4, 8.5, 20);
+camera.lookAt(-4, 1, 0);
+
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:false});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+renderer.domElement.setAttribute('aria-hidden', 'true');
+document.body.prepend(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xcfe2ff, 0x263044, 1.45));
+const key = new THREE.DirectionalLight(0xffe5c2, 3.0);
+key.position.set(-5, 12, 8);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.left = -13;
+key.shadow.camera.right = 13;
+key.shadow.camera.top = 11;
+key.shadow.camera.bottom = -8;
+key.shadow.camera.near = 0.5;
+key.shadow.camera.far = 38;
+key.shadow.bias = -0.00025;
+key.shadow.normalBias = 0.025;
+scene.add(key);
+const fill = new THREE.DirectionalLight(0x81bfff, 1.1);
+fill.position.set(7, 6, -8);
+scene.add(fill);
+
+const material = (color, roughness=0.48, metalness=0) =>
+  new THREE.MeshStandardMaterial({color, roughness, metalness});
+const mats = {
+  table: material(0x263348, 0.7),
+  edge: material(0x101a2a, 0.5, 0.3),
+  brass: material(0xe4ad54, 0.32, 0.68),
+  darkMetal: material(0x526178, 0.32, 0.65),
+  rail: material(0xe9b85f, 0.34, 0.55),
+  ramp: material(0x80a8b8, 0.4, 0.22),
+  red: material(0xf05b55, 0.38),
+  white: material(0xf5efdc, 0.42),
+  ball1: material(0xff8b46, 0.25, 0.12),
+  ball2: material(0x42d7c0, 0.22, 0.16)
+};
+
+function box(w,h,d,mat,x=0,y=0,z=0,parent=scene){
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+  m.position.set(x,y,z);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  parent.add(m);
+  return m;
+}
+function cylinder(rt,rb,h,mat,x,y,z,segments=24,parent=scene){
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,segments),mat);
+  m.position.set(x,y,z);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  parent.add(m);
+  return m;
+}
+function beamBetween(a,b,r,mat,parent=scene){
+  const v = new THREE.Vector3().subVectors(b,a);
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r,r,v.length(),12),mat);
+  m.position.copy(a).add(b).multiplyScalar(0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),v.normalize());
+  m.castShadow = true;
+  m.receiveShadow = true;
+  parent.add(m);
+  return m;
+}
+function tube(points,r,mat,parent=scene){
+  const curve = new THREE.CatmullRomCurve3(points);
+  const m = new THREE.Mesh(new THREE.TubeGeometry(curve,80,r,8,false),mat);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  parent.add(m);
+  return m;
+}
+const clamp = (x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+const smooth = x=>{x=clamp(x);return x*x*(3-2*x)};
+const lerp = (a,b,t)=>a+(b-a)*t;
+const easeOut = x=>{x=clamp(x);return 1-(1-x)*(1-x)};
+
+const tabletop = box(19,0.36,5.8,mats.table,-1,-0.18,0);
+tabletop.receiveShadow = true;
+box(19.08,0.10,0.08,mats.brass,-1,-0.20,2.91);
+box(19.08,0.10,0.08,mats.edge,-1,-0.20,-2.91);
+for (const x of [-8.7,-1.0,6.7]){
+  for (const z of [-2.15,2.15]) box(0.26,0.78,0.26,mats.edge,x,-0.72,z);
+}
+box(200,0.1,200,material(0x111a29,0.9),0,-0.96,0);
+
+const dominoes = [];
+const dominoCount = 14;
+const pathPoints = [];
+for(let i=0;i<dominoCount;i++){
+  const q=i/(dominoCount-1);
+  const p={x:-8.2+i*0.30, z:-0.48+0.48*Math.sin(q*Math.PI)};
+  pathPoints.push(p);
+}
+tube(pathPoints.map(p=>new THREE.Vector3(p.x,0.018,p.z)),0.022,material(0x5c8298,0.38,0.48));
+const dominoColors=[0xf06a63,0xf28a56,0xf0ae4f,0xd9c44e,0x9fc963,0x55c6a7,0x50b6d2,0x6595dc,0x8b83dc,0xb17dd2,0xd278ad,0xeb777b,0xf0a263,0xf1cb70];
+for(let i=0;i<dominoCount;i++){
+  const p=pathPoints[i], prev=pathPoints[Math.max(0,i-1)], next=pathPoints[Math.min(dominoCount-1,i+1)];
+  const yaw=Math.atan2(-(next.z-prev.z),next.x-prev.x);
+  const pivot=new THREE.Group();
+  pivot.position.set(p.x,0,p.z);
+  scene.add(pivot);
+  const body=box(0.32,0.72,0.13,material(dominoColors[i],0.32),0,0.36,0,pivot);
+  body.rotation.set(0,0,0);
+  const pipMat=mats.white;
+  for(const [dx,dy] of [[0,0.16],[-0.065,-0.03],[0.065,-0.22]]){
+    const pip=new THREE.Mesh(new THREE.SphereGeometry(0.027,10,8),pipMat);
+    pip.position.set(dx,0.36+dy,0.071);
+    pip.castShadow=true;
+    pivot.add(pip);
+  }
+  dominoes.push({pivot,yaw});
+}
+
+const starterPost=cylinder(0.09,0.12,1.22,mats.darkMetal,-8.88,0.61,0,20);
+cylinder(0.25,0.25,0.08,mats.brass,-8.88,0.04,0,24);
+const starterPivot=new THREE.Group();
+starterPivot.position.set(-8.88,1.19,0);
+scene.add(starterPivot);
+box(0.10,0.90,0.12,mats.darkMetal,0,-0.45,0,starterPivot);
+box(0.28,0.20,0.24,mats.red,0,-0.91,0,starterPivot);
+cylinder(0.14,0.14,0.09,mats.brass,0,-0.91,0.16,18,starterPivot);
+
+const rampStart={x:-3.80,y:0.70};
+const rampEnd={x:-1.55,y:0.42};
+const rampDx=rampEnd.x-rampStart.x;
+const rampDy=rampEnd.y-rampStart.y;
+const rampLength=Math.hypot(rampDx,rampDy);
+const rampAngle=Math.atan2(rampDy,rampDx);
+const rampBoard=box(rampLength,0.14,1.06,mats.ramp,(rampStart.x+rampEnd.x)/2,(rampStart.y+rampEnd.y)/2-0.07,0);
+rampBoard.rotation.z=rampAngle;
+for(const side of [-0.44,0.44]){
+  beamBetween(new THREE.Vector3(rampStart.x,rampStart.y+0.12,side),new THREE.Vector3(rampEnd.x,rampEnd.y+0.12,side),0.052,mats.rail);
+}
+for(const x of [-2.95,-2.15]){
+  const y=rampStart.y+(x-rampStart.x)*(rampDy/rampDx);
+  cylinder(0.045,0.06,Math.max(0.05,y-0.03),mats.darkMetal,x,(y-0.03)/2,0,16);
+  box(0.20,0.06,0.8,mats.brass,x,0.04,0);
+}
+const rampY=x=>rampStart.y+(x-rampStart.x)*(rampDy/rampDx);
+
+function makeBall(color,radius){
+  const g=new THREE.Group();
+  const sphere=new THREE.Mesh(new THREE.SphereGeometry(radius,32,24),color);
+  sphere.castShadow=true;
+  sphere.receiveShadow=true;
+  g.add(sphere);
+  const stripe=new THREE.Mesh(new THREE.TorusGeometry(radius*0.73,0.018,8,36),mats.white);
+  stripe.rotation.x=Math.PI/2;
+  stripe.castShadow=true;
+  g.add(stripe);
+  scene.add(g);
+  return g;
+}
+const ballRadius=0.24;
+const ball1=makeBall(mats.ball1,ballRadius);
+const ball2=makeBall(mats.ball2,ballRadius);
+
+const pivotX=-0.20, pivotY=0.48, beamHalf=1.16;
+const fulcrum=new THREE.Mesh(new THREE.ConeGeometry(0.37,0.48,4),mats.brass);
+fulcrum.position.set(pivotX,0.24,0);
+fulcrum.rotation.y=Math.PI/4;
+fulcrum.castShadow=true;
+fulcrum.receiveShadow=true;
+scene.add(fulcrum);
+const seesaw=new THREE.Group();
+seesaw.position.set(pivotX,pivotY,0);
+scene.add(seesaw);
+box(beamHalf*2,0.14,0.42,material(0xe05d53,0.38),0,0,0,seesaw);
+box(0.28,0.16,0.46,mats.brass,-beamHalf,0,0,seesaw);
+box(0.28,0.16,0.46,mats.brass,beamHalf,0,0,seesaw);
+for(const z of [-0.19,0.19]){
+  box(beamHalf*2-0.25,0.07,0.055,mats.rail,0,0.095,z,seesaw);
+}
+for(const x of [-beamHalf,beamHalf]){
+  const cap=new THREE.Mesh(new THREE.SphereGeometry(0.10,16,12),mats.brass);
+  cap.position.set(x,0.12,0);
+  cap.castShadow=true;
+  seesaw.add(cap);
+}
+
+const TOWER_X=2.75;
+const tower=new THREE.Group();
+tower.position.set(TOWER_X,0.02,0);
+scene.add(tower);
+const blockMats=[material(0x5cc7b3,0.35),material(0x70a8e8,0.34),material(0xe9ad4f,0.36),material(0xe67868,0.35)];
+const blocks=[];
+for(let i=0;i<4;i++){
+  const b=box(0.55,0.55,0.58,blockMats[i],0,0.29+i*0.58,0,tower);
+  const mark=box(0.24,0.045,0.018,mats.white,0,0,0.30,tower);
+  mark.position.y=0.29+i*0.58;
+  blocks.push(b);
+}
+const switchX=4.78;
+cylinder(0.26,0.28,0.12,mats.darkMetal,switchX,0.06,0,24);
+const button=cylinder(0.19,0.19,0.13,mats.red,switchX,0.17,0,24);
+const wireMat=material(0xf0bf61,0.35,0.42);
+tube([
+  new THREE.Vector3(switchX,0.035,0.04),
+  new THREE.Vector3(5.08,0.035,0.04),
+  new THREE.Vector3(5.36,0.035,0.16),
+  new THREE.Vector3(5.62,0.035,0.16)
+],0.024,wireMat);
+
+const flagX=5.62;
+cylinder(0.055,0.075,3.02,mats.darkMetal,flagX,1.51,0.16,20);
+cylinder(0.22,0.24,0.10,mats.brass,flagX,0.05,0.16,24);
+const finial=new THREE.Mesh(new THREE.SphereGeometry(0.105,16,12),mats.brass);
+finial.position.set(flagX,3.06,0.16);
+finial.castShadow=true;
+scene.add(finial);
+const flagRig=new THREE.Group();
+flagRig.position.set(flagX,0.55,0.16);
+scene.add(flagRig);
+const flagShape=new THREE.Shape();
+flagShape.moveTo(0,0);
+flagShape.lineTo(1.02,-0.04);
+flagShape.lineTo(0.82,-0.43);
+flagShape.lineTo(0,-0.30);
+flagShape.closePath();
+const flag=new THREE.Mesh(new THREE.ShapeGeometry(flagShape),new THREE.MeshStandardMaterial({color:0xffc451,roughness:0.42,side:THREE.DoubleSide}));
+flag.castShadow=true;
+flag.receiveShadow=true;
+flag.position.z=0.04;
+flagRig.add(flag);
+const flagStripe=box(0.52,0.055,0.025,mats.red,0.47,-0.22,0.065,flagRig);
+
+for(const x of [-8.2,-5.5,-2.8,0.2,2.75,5.62]){
+  cylinder(0.055,0.055,0.025,mats.brass,x,0.015,2.25,12);
+}
+
+const LOOP=10.5;
+const DOMINO_FIRST=0.34;
+const DOMINO_INTERVAL=0.12;
+const DOMINO_FALL=0.36;
+const BALL_START=2.28;
+const LEVER_START=3.25;
+const BALL2_LAUNCH=3.82;
+const BALL2_HIT=4.48;
+const TOWER_START=4.50;
+const FLAG_START=5.28;
+const stages=[1,2,3,4,5].map(n=>document.getElementById(`stage${n}`));
+const clockEl=document.getElementById('clock');
+const started=performance.now();
+
+function update(t){
+  let swing;
+  if(t<0.10) swing=-0.58;
+  else if(t<0.43) swing=lerp(-0.58,0.88,smooth((t-0.10)/0.33));
+  else if(t<0.92) swing=lerp(0.88,-0.20,smooth((t-0.43)/0.49));
+  else swing=-0.20;
+  starterPivot.rotation.z=swing;
+
+  for(let i=0;i<dominoes.length;i++){
+    const d=dominoes[i];
+    const fall=1.48*smooth((t-(DOMINO_FIRST+i*DOMINO_INTERVAL))/DOMINO_FALL);
+    const qYaw=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),d.yaw);
+    const qFall=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-fall);
+    d.pivot.quaternion.copy(qYaw).multiply(qFall);
+  }
+
+  const rampU=clamp((t-BALL_START)/0.96);
+  let b1x=-3.80, b1y=rampY(b1x)+ballRadius*Math.cos(rampAngle);
+  if(t>=BALL_START && t<BALL_START+0.96){
+    b1x=lerp(-3.80,-1.55,easeOut(rampU));
+    b1y=rampY(b1x)+ballRadius*Math.cos(rampAngle);
+  }else if(t>=BALL_START+0.96){
+    const slide=smooth((t-(BALL_START+0.96))/0.20);
+    b1x=lerp(-1.55,-1.36,slide);
+    b1y=lerp(rampEnd.y+ballRadius*Math.cos(rampAngle),pivotY+ballRadius*0.72,slide);
+  }
+  ball1.position.set(b1x,b1y,0);
+  ball1.rotation.z=-(b1x+3.80)/ballRadius;
+
+  const leverProgress=smooth((t-LEVER_START)/0.54);
+  const leverAngle=0.52*leverProgress;
+  seesaw.rotation.z=leverAngle;
+  const tipX=pivotX+Math.cos(leverAngle)*beamHalf;
+  const tipY=pivotY+Math.sin(leverAngle)*beamHalf;
+  const launchX=tipX;
+  const launchY=tipY+ballRadius+0.06;
+  if(t<BALL2_LAUNCH){
+    ball2.position.set(launchX,launchY,0);
+    ball2.rotation.z=0;
+  }else{
+    const u=clamp((t-BALL2_LAUNCH)/(BALL2_HIT-BALL2_LAUNCH));
+    const arc=Math.sin(Math.PI*u);
+    ball2.position.set(lerp(launchX,2.23,u),lerp(launchY,0.51,u)+1.02*arc,0);
+    ball2.rotation.z=-u*5.0;
+  }
+
+  const towerProgress=smooth((t-TOWER_START)/0.68);
+  tower.rotation.z=-1.22*towerProgress;
+  for(let i=0;i<blocks.length;i++){
+    const loosen=smooth((towerProgress-0.70)/0.30);
+    blocks[i].position.x=0.035*i*towerProgress;
+    blocks[i].position.y=0.29+i*0.58-0.035*i*loosen;
+    blocks[i].rotation.z=-0.07*i*loosen;
+  }
+  const press=smooth((t-5.08)/0.22);
+  button.position.y=0.17-0.085*press;
+  const flagLift=smooth((t-FLAG_START)/0.78);
+  flagRig.position.y=0.55+1.78*flagLift;
+  flagRig.rotation.z=0.035*Math.sin(t*5.5)*flagLift;
+
+  let focusX;
+  if(t<2.20) focusX=-4.5;
+  else if(t<3.30) focusX=lerp(-4.5,-1.6,smooth((t-2.20)/1.10));
+  else if(t<4.50) focusX=lerp(-1.6,1.6,smooth((t-3.30)/1.20));
+  else if(t<5.50) focusX=lerp(1.6,3.5,smooth((t-4.50)/1.0));
+  else focusX=3.5;
+  camera.position.set(focusX,8.5,20);
+  camera.lookAt(focusX,1.05,0);
+
+  const fireAt=[0.30,2.18,3.25,BALL2_HIT,5.24];
+  for(let i=0;i<stages.length;i++){
+    stages[i].classList.toggle('active',t>=fireAt[i]);
+  }
+  document.documentElement.style.setProperty('--progress',`${100*t/LOOP}%`);
+  clockEl.textContent=`RESET IN ${(LOOP-t).toFixed(1)}s`;
+}
+
+function frame(now){
+  const elapsed=(now-started)/1000;
+  const t=elapsed%LOOP;
+  update(t);
+  renderer.render(scene,camera);
+  requestAnimationFrame(frame);
+}
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.setSize(innerWidth,innerHeight);
+});
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

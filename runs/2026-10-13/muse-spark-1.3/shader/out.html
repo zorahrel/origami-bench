@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Raymarched SDF</title>
+<style>html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#000}canvas{display:block;width:100vw;height:100vh}</style>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+const renderer = new THREE.WebGLRenderer({ antialias: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const uniforms = { uTime: { value: 0.0 }, uRes: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) } };
+const mat = new THREE.ShaderMaterial({
+uniforms: uniforms,
+vertexShader: 'void main(){gl_Position=vec4(position.xy,0.0,1.0);}',
+fragmentShader: `
+uniform float uTime;
+uniform vec2 uRes;
+#define MAXD 32.0
+mat2 rot(float a){float c=cos(a);float s=sin(a);return mat2(c,-s,s,c);}
+float sdSphere(vec3 p,float r){return length(p)-r;}
+float sdBox(vec3 p,vec3 b){vec3 q=abs(p)-b;return length(max(q,vec3(0.0)))+min(max(q.x,max(q.y,q.z)),0.0);}
+float sdTorus(vec3 p,vec2 t){vec2 q=vec2(length(p.xz)-t.x,p.y);return length(q)-t.y;}
+float sdCapsule(vec3 p,vec3 a,vec3 b,float r){vec3 pa=p-a;vec3 ba=b-a;float h=clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0);return length(pa-ba*h)-r;}
+float smin(float a,float b,float k){float h=clamp(0.5+0.5*(b-a)/k,0.0,1.0);return mix(b,a,h)-k*h*(1.0-h);}
+vec2 mapScene(vec3 p){
+float k=0.35+0.18*sin(uTime*0.7);
+vec3 sp=p-vec3(-1.35+0.35*sin(uTime*0.8),1.05+0.35*sin(uTime*1.1),0.2*cos(uTime*0.6));
+float d1=sdSphere(sp,0.65);
+vec3 tp=p-vec3(1.25,0.95+0.3*cos(uTime*0.9),0.0);
+tp.xz=rot(uTime*0.5)*tp.xz;
+float d2=sdTorus(tp,vec2(0.55,0.18));
+vec3 bp=p-vec3(0.0,1.25+0.25*sin(uTime*0.7+1.7),-1.35);
+bp.xy=rot(uTime*0.4)*bp.xy;
+bp.xz=rot(uTime*0.3)*bp.xz;
+float d3=sdBox(bp,vec3(0.5,0.5,0.5));
+vec3 a=vec3(-0.2+0.5*cos(uTime*0.6),0.5,1.25+0.3*sin(uTime*0.5));
+vec3 b=vec3(0.4+0.4*sin(uTime*0.9),1.7+0.3*cos(uTime*1.2),1.1);
+float d4=sdCapsule(p,a,b,0.22);
+float df=p.y;
+float d=smin(d1,d2,k);
+d=smin(d,d3,k);
+d=smin(d,d4,k);
+float m=1.0;
+float dm=min(min(d1,d2),min(d3,d4));
+if(df<dm+0.02&&df<d+0.35){m=0.0;}
+else if(dm==d2){m=2.0;}
+else if(dm==d3){m=3.0;}
+else if(dm==d4){m=4.0;}
+else{m=1.0;}
+d=smin(d,df,0.3);
+return vec2(d,m);
+}
+vec3 calcNormal(vec3 p){
+vec2 e=vec2(0.0015,0.0);
+return normalize(vec3(
+mapScene(p+e.xyy).x-mapScene(p-e.xyy).x,
+mapScene(p+e.yxy).x-mapScene(p-e.yxy).x,
+mapScene(p+e.yyx).x-mapScene(p-e.yyx).x));
+}
+float softShadow(vec3 ro,vec3 rd,float tmin,float tmax){
+float res=1.0;
+float t=tmin;
+for(int i=0;i<32;i++){
+float h=mapScene(ro+rd*t).x;
+if(h<0.001){return 0.0;}
+res=min(res,8.0*h/t);
+t+=clamp(h,0.02,0.4);
+if(t>tmax){break;}
+}
+return clamp(res,0.0,1.0);
+}
+float calcAO(vec3 p,vec3 n){
+float occ=0.0;
+float sca=1.0;
+for(int i=0;i<5;i++){
+float h=0.01+0.12*float(i)/4.0;
+float d=mapScene(p+n*h).x;
+occ+=(h-d)*sca;
+sca*=0.95;
+}
+return clamp(1.0-3.0*occ,0.0,1.0);
+}
+vec3 matColor(float m,vec3 p){
+if(m<0.5){
+float c=fract((p.x+p.z)*0.5);
+return mix(vec3(0.16,0.17,0.2),vec3(0.32,0.33,0.38),step(0.5,c));
+}
+if(m<1.5){return vec3(1.0,0.32,0.15);}
+if(m<2.5){return vec3(0.1,0.85,0.75);}
+if(m<3.5){return vec3(0.55,0.3,1.0);}
+return vec3(0.75,0.95,0.2);
+}
+vec2 raymarch(vec3 ro,vec3 rd){
+float t=0.0;
+float m=0.0;
+for(int i=0;i<110;i++){
+vec3 p=ro+rd*t;
+vec2 h=mapScene(p);
+m=h.y;
+if(h.x<0.0015){return vec2(t,m);}
+t+=h.x*0.9;
+if(t>MAXD){break;}
+}
+return vec2(MAXD,m);
+}
+vec3 aces(vec3 x){
+return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0,1.0);
+}
+vec3 shadeHit(vec3 p,vec3 n,float m,vec3 ro,vec3 rd){
+vec3 lightPos=vec3(4.0*cos(uTime*0.3),6.0,4.0*sin(uTime*0.3));
+vec3 L=normalize(lightPos-p);
+vec3 V=normalize(ro-p);
+float dif=clamp(dot(n,L),0.0,1.0);
+float sh=softShadow(p+n*0.003,L,0.02,20.0);
+float ao=calcAO(p,n);
+vec3 H=normalize(L+V);
+float spec=pow(clamp(dot(n,H),0.0,1.0),48.0);
+vec3 base=matColor(m,p);
+vec3 col=base*(0.25+0.25*ao);
+col+=base*dif*sh*1.4;
+col+=vec3(1.0,0.95,0.85)*spec*sh*0.7;
+float fres=pow(1.0-clamp(dot(-rd,n),0.0,1.0),3.0);
+vec3 rimC=mix(vec3(0.1,0.5,1.0),vec3(1.0,0.3,0.8),0.5+0.5*sin(uTime*0.8));
+col+=rimC*fres*(0.35+0.65*sh);
+return col;
+}
+void main(){
+vec2 uv=(gl_FragCoord.xy*2.0-uRes)/uRes.y;
+float an=uTime*0.25;
+vec3 ro=vec3(4.6*cos(an),2.3+0.6*sin(uTime*0.23),4.6*sin(an));
+vec3 ta=vec3(0.0,0.9,0.0);
+vec3 fw=normalize(ta-ro);
+vec3 rt=normalize(cross(fw,vec3(0.0,1.0,0.0)));
+vec3 up=cross(rt,fw);
+vec3 rd=normalize(uv.x*rt+uv.y*up+1.9*fw);
+vec2 res=raymarch(ro,rd);
+float t=res.x;
+vec3 col;
+if(t>=MAXD){
+float g=clamp(rd.y*0.5+0.5,0.0,1.0);
+col=mix(vec3(0.02,0.03,0.07),vec3(0.08,0.16,0.3),g);
+col+=vec3(0.9,0.4,0.7)*pow(clamp(1.0-length(uv*0.6),0.0,1.0),3.0)*0.25;
+}else{
+vec3 p=ro+rd*t;
+vec3 n=calcNormal(p);
+float m=res.y;
+col=shadeHit(p,n,m,ro,rd);
+vec3 rf=reflect(rd,n);
+vec2 r2=raymarch(p+n*0.004,rf);
+vec3 rcol=vec3(0.05,0.08,0.14);
+if(r2.x<MAXD){
+vec3 p2=p+n*0.004+rf*r2.x;
+vec3 n2=calcNormal(p2);
+rcol=shadeHit(p2,n2,r2.y,p+n*0.004,rf)*0.7;
+}else{
+rcol=mix(vec3(0.02,0.03,0.07),vec3(0.1,0.2,0.38),clamp(rf.y*0.5+0.5,0.0,1.0));
+}
+float fres=pow(1.0-clamp(dot(-rd,n),0.0,1.0),3.0);
+float refl=clamp(0.15+0.75*fres,0.0,1.0);
+if(m<0.5){refl*=0.7;}
+col=mix(col,rcol,refl);
+float fog=1.0-exp(-0.028*t*t);
+col=mix(col,vec3(0.04,0.06,0.12),clamp(fog,0.0,1.0));
+}
+col=aces(col*1.15);
+col=pow(clamp(col,0.0,1.0),vec3(1.0/2.2));
+gl_FragColor=vec4(col,1.0);
+}
+`
+});
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+scene.add(quad);
+window.addEventListener('resize', () => {
+renderer.setSize(window.innerWidth, window.innerHeight);
+uniforms.uRes.value.set(window.innerWidth, window.innerHeight);
+});
+const clock = new THREE.Clock();
+function tick() {
+uniforms.uTime.value = clock.getElapsedTime();
+renderer.render(scene, camera);
+requestAnimationFrame(tick);
+}
+tick();
+</script>
+</body>
+</html>

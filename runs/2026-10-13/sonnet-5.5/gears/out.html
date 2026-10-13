@@ -1,0 +1,105 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Clockwork Automaton</title><style>html,body{margin:0;height:100%;background:#07080b;overflow:hidden}canvas{display:block}</style></head><body><script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+const P=Math.PI,TAU=P*2,M=.05;
+const R=new THREE.WebGLRenderer({antialias:true});R.setPixelRatio(Math.min(devicePixelRatio,2));R.setSize(innerWidth,innerHeight);
+R.toneMapping=THREE.ACESFilmicToneMapping;R.toneMappingExposure=1.15;document.body.appendChild(R.domElement);
+const S=new THREE.Scene();S.background=new THREE.Color(0x07080b);
+const cam=new THREE.PerspectiveCamera(40,innerWidth/innerHeight,.1,100);
+// fake studio environment: gradient plus bright softboxes
+const cv=document.createElement('canvas');cv.width=512;cv.height=256;const cx=cv.getContext('2d');
+const gr=cx.createLinearGradient(0,0,0,256);gr.addColorStop(0,'#c4d4ff');gr.addColorStop(.45,'#3a3f52');gr.addColorStop(.55,'#1b1712');gr.addColorStop(1,'#6b4f2a');
+cx.fillStyle=gr;cx.fillRect(0,0,512,256);cx.fillStyle='#fff';
+[[60,40,90,30],[250,20,120,24],[400,70,70,40]].forEach(r=>cx.fillRect(...r));
+cx.fillStyle='#ffd9a0';cx.fillRect(150,100,50,70);
+const et=new THREE.CanvasTexture(cv);et.mapping=THREE.EquirectangularReflectionMapping;et.colorSpace=THREE.SRGBColorSpace;
+S.environment=new THREE.PMREMGenerator(R).fromEquirectangular(et).texture;
+const dl=new THREE.DirectionalLight(0xfff0d8,2.2);dl.position.set(-4,6,8);S.add(dl);
+const pl=new THREE.PointLight(0xffb060,45,30);pl.position.set(3,2,5);S.add(pl);
+const mat=(c,r=.32)=>new THREE.MeshStandardMaterial({color:c,metalness:1,roughness:r});
+const brass=mat(0xd2a64a),steel=mat(0xaab4c0,.25),copper=mat(0xc07040,.4),dark=mat(0x2a2f38,.55),gold=mat(0xf0c860,.2);
+const bellMat=mat(0xe8c060,.22);bellMat.side=THREE.DoubleSide;
+const add=(o,x,y,z)=>{o.position.set(x,y,z);S.add(o);return o};
+function arbor(x,y,z0,z1,r=.05,m=steel){const c=new THREE.Mesh(new THREE.CylinderGeometry(r,r,z1-z0,14),m);c.rotation.x=P/2;return add(c,x,y,(z0+z1)/2)}
+// extruded body with optional open hub and spokes (so lower layers show through)
+function body(sh,hr,m,x,y,z){
+  if(hr){const h=new THREE.Path();h.absarc(0,0,hr,0,TAU,true);sh.holes.push(h)}
+  const g=new THREE.Group(),b=new THREE.Mesh(new THREE.ExtrudeGeometry(sh,{depth:.1,bevelEnabled:false,curveSegments:24}),m);
+  b.position.z=-.05;g.add(b);
+  if(hr)for(let k=0;k<3;k++){const s=new THREE.Mesh(new THREE.BoxGeometry(hr*2.05,.07,.08),m);s.rotation.z=k*P/3;g.add(s)}
+  return add(g,x,y,z)}
+function gear(N,z,m,x,y,hr){
+  const r=N*M/2,p=TAU/N,sh=new THREE.Shape(),pts=[];
+  for(let i=0;i<N;i++)[[-.26,-.035],[-.13,.03],[.13,.03],[.26,-.035]].forEach(([da,dr])=>pts.push([i*p+da*p,r+dr]));
+  pts.forEach(([a,q],i)=>{const X=q*Math.cos(a),Y=q*Math.sin(a);i?sh.lineTo(X,Y):sh.moveTo(X,Y)});
+  return body(sh,hr,m,x,y,z)}
+// meshing: child angle from parent angle so teeth interlock and turn opposite
+const mg=(t,Np,Nc,f)=>-t*Np/Nc+f*(1+Np/Nc)+P-P/Nc;
+const d=(a,b)=>(a+b)*M/2;
+const al=200*P/180,A=[d(30,60)*Math.cos(al),d(30,60)*Math.sin(al)];
+const fB=290*P/180,B=[A[0]+d(10,40)*Math.cos(fB),A[1]+d(10,40)*Math.sin(fB)];
+const dd=Math.hypot(B[0],B[1]),r1=d(8,18),r2=d(18,60),xx=(dd*dd+r1*r1-r2*r2)/(2*dd),hh=Math.sqrt(Math.max(0,r1*r1-xx*xx)),ux=-B[0]/dd,uy=-B[1]/dd;
+const I=[B[0]+xx*ux-hh*uy,B[1]+xx*uy+hh*ux];
+const fBI=Math.atan2(I[1]-B[1],I[0]-B[0]),fIC=Math.atan2(-I[1],-I[0]);
+// backplate and pillars
+add(new THREE.Mesh(new THREE.BoxGeometry(11,9.8,.15),dark),.2,-1.9,-1.1);
+[[-4.9,2.6],[5.3,2.6],[-4.9,-6.4],[5.3,-6.4]].forEach(([x,y])=>arbor(x,y,-1.1,1.2,.12,brass));
+// gear train: 8 gears + escape wheel
+const gE=gear(30,0,brass,0,0,.45),gA=gear(60,0,copper,A[0],A[1],1.05),ga=gear(10,.3,steel,A[0],A[1],0),
+gB=gear(40,.3,brass,B[0],B[1],.6),gb=gear(8,.6,steel,B[0],B[1],0),gI=gear(18,.6,copper,I[0],I[1],.18),
+gC=gear(60,.6,gold,0,0,1.1),gK=gear(15,0,steel,1.125,0,0);
+arbor(0,0,-.2,1.75);arbor(A[0],A[1],-.1,.4);arbor(B[0],B[1],.2,.7);arbor(I[0],I[1],.5,.7);arbor(1.125,0,-.1,1.35);
+const es=new THREE.Shape();
+for(let i=0;i<30;i++){const a=i*TAU/30,p=TAU/30;[[a,.62],[a+.55*p,.8]].forEach(([b,q],j)=>{const X=q*Math.cos(b),Y=q*Math.sin(b);(i||j)?es.lineTo(X,Y):es.moveTo(X,Y)})}
+const esc=body(es,.38,steel,0,0,1);
+// cam: 6 sawtooth lobes, one drop per 5 ticks
+const cs=new THREE.Shape();
+for(let k=0;k<6;k++)for(let j=0;j<=6;j++){const u=j/6,a=(k+u)*P/3,q=.28+.2*(1-u),X=q*Math.cos(a),Y=q*Math.sin(a);(k||j)?cs.lineTo(X,Y):cs.moveTo(X,Y)}
+const camM=body(cs,0,copper,1.125,0,1.3);
+// anchor + pendulum
+const ash=new THREE.Shape();[[-.08,.1],[-.5,-.5],[-.36,-.58],[-.04,-.12],[.04,-.12],[.36,-.58],[.5,-.5],[.08,.1]].forEach(([x,y],i)=>i?ash.lineTo(x,y):ash.moveTo(x,y));
+const anc=new THREE.Group(),am=new THREE.Mesh(new THREE.ExtrudeGeometry(ash,{depth:.1,bevelEnabled:false}),gold);am.position.z=-.05;anc.add(am);add(anc,0,1.15,1);
+arbor(0,1.15,-.6,1.15,.06);
+const pend=new THREE.Group();
+const rod=new THREE.Mesh(new THREE.BoxGeometry(.05,5.6,.04),steel);rod.position.y=-2.8;pend.add(rod);
+const bob=new THREE.Mesh(new THREE.SphereGeometry(.5,32,16),gold);bob.scale.z=.35;bob.position.y=-5.6;pend.add(bob);
+const bobR=new THREE.Mesh(new THREE.TorusGeometry(.5,.03,8,40),brass);bobR.position.y=-5.6;pend.add(bobR);
+add(pend,0,1.15,-.55);
+// dial ring + hands
+add(new THREE.Mesh(new THREE.TorusGeometry(1.95,.045,12,96),gold),0,0,1.5);
+for(let i=0;i<60;i++){const big=i%5==0,t=new THREE.Mesh(new THREE.BoxGeometry(big?.07:.025,big?.22:.1,.04),big?gold:steel),a=P/2-i*TAU/60;
+  t.rotation.z=a-P/2;add(t,1.78*Math.cos(a),1.78*Math.sin(a),1.5)}
+function hand(len,w,z,m,tail){const g=new THREE.Group(),b=new THREE.Mesh(new THREE.BoxGeometry(w,len,.03),m);b.position.y=(len-tail)/2;g.add(b);g.position.z=z;S.add(g);return g}
+const hs=hand(1.75,.025,1.68,mat(0xff4030,.3),.3),hm=hand(1.3,.07,1.58,steel,.2);
+add(new THREE.Mesh(new THREE.SphereGeometry(.09,16,12),gold),0,0,1.72);
+// hammer riding on the cam, and the bell
+const arm=new THREE.Group();
+const ab=new THREE.Mesh(new THREE.BoxGeometry(2.2,.06,.05),brass);ab.position.x=1.1;arm.add(ab);
+const hd=new THREE.Mesh(new THREE.CylinderGeometry(.09,.09,.25,16),steel);hd.position.set(2.2,-.15,0);arm.add(hd);
+arm.add(new THREE.Mesh(new THREE.SphereGeometry(.07,12,8),gold));add(arm,.5,.3,1.3);
+const bell=new THREE.Group();
+const dome=new THREE.Mesh(new THREE.SphereGeometry(.45,28,14,0,TAU,0,P/2),bellMat);dome.position.y=-.4;bell.add(dome);
+const lip=new THREE.Mesh(new THREE.TorusGeometry(.45,.03,8,32),gold);lip.rotation.x=P/2;lip.position.y=-.4;bell.add(lip);
+add(bell,2.7,.05,1.3);arbor(2.7,.1,-1,1.22,.06);
+const sst=(a,b,x)=>{const t=Math.min(1,Math.max(0,(x-a)/(b-a)));return t*t*(3-2*t)};
+const t0=performance.now();
+function frame(){
+  const t=(performance.now()-t0)/1000,Mst=(t+3)*P; // master angle: pendulum phase
+  const T=Mst/P,n=Math.floor(T),e=sst(0,.18,T-n),Eang=(n+e)*P/30; // escape wheel steps 6 deg per tick
+  const ang=.2*Math.sin(Mst);pend.rotation.z=ang;anc.rotation.z=ang;
+  const tE=-Eang;gE.rotation.z=tE;esc.rotation.z=tE;
+  const tA=mg(tE,30,60,al);gA.rotation.z=ga.rotation.z=tA;
+  const tB=mg(tA,10,40,fB);gB.rotation.z=gb.rotation.z=tB;
+  const tI=mg(tB,8,18,fBI);gI.rotation.z=tI;
+  gC.rotation.z=mg(tI,18,60,fIC);
+  const tK=mg(tE,30,15,0);gK.rotation.z=tK;camM.rotation.z=tK;
+  hs.rotation.z=-Eang;hm.rotation.z=-Eang/60; // 1:60
+  const q=((n+e)/5)%1,L=q*(1-sst(.78,1,q));arm.rotation.z=.32*L;
+  const dt=(T+.82)%5;bell.rotation.z=T>=4.18?Math.exp(-dt*2.2)*Math.sin(dt*38)*.14:0;
+  const a=innerWidth/innerHeight,dist=Math.max(12,9/(.728*a));
+  cam.aspect=a;cam.updateProjectionMatrix();
+  cam.position.set(.3+Math.sin(t*.2)*1.4,-1.6+Math.cos(t*.15)*.7,dist);cam.lookAt(.3,-1.6,0);
+  pl.position.x=3+Math.sin(t*.5)*2;
+  R.render(S,cam);requestAnimationFrame(frame)}
+addEventListener('resize',()=>R.setSize(innerWidth,innerHeight));
+frame();
+</script></body></html>

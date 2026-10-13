@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Clockwork Automaton</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#0d0b09}canvas{display:block}</style></head>
+<body>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+const R=new THREE.WebGLRenderer({antialias:true});
+R.setPixelRatio(Math.min(devicePixelRatio,2));R.setSize(innerWidth,innerHeight);
+R.toneMapping=THREE.ACESFilmicToneMapping;R.toneMappingExposure=1.1;
+document.body.appendChild(R.domElement);
+const S=new THREE.Scene();S.background=new THREE.Color(0x0d0b09);S.fog=new THREE.Fog(0x0d0b09,18,34);
+const cam=new THREE.PerspectiveCamera(38,innerWidth/innerHeight,.1,100);
+// fake environment: dark room with warm and cool light panels
+const env=new THREE.Scene();
+env.add(new THREE.Mesh(new THREE.BoxGeometry(20,20,20),new THREE.MeshBasicMaterial({color:0x2a221b,side:THREE.BackSide})));
+function panel(r,g,b,k,x,y,z,w,h){const p=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({color:new THREE.Color(r,g,b).multiplyScalar(k),side:2}));p.position.set(x,y,z);p.lookAt(0,0,0);env.add(p);}
+panel(1,.88,.7,6,0,9,3,10,4);panel(.6,.75,1,3,-9,2,4,4,8);panel(1,.8,.6,4,8,-1,6,3,9);panel(1,1,1,2,0,-6,9,12,2);
+const pm=new THREE.PMREMGenerator(R);S.environment=pm.fromScene(env,.04).texture;
+const L=new THREE.DirectionalLight(0xfff0dd,1.6);L.position.set(5,8,10);S.add(L,new THREE.AmbientLight(0xffffff,.08));
+const M=(c,r,m=1)=>new THREE.MeshStandardMaterial({color:c,metalness:m,roughness:r});
+const brass=M(0xd09a42,.26),brass2=M(0xa8742c,.34),steel=M(0xc9cdd3,.2),blue=M(0x1c2c70,.25),plateM=M(0x2b2420,.55,.6),ivory=M(0xeadfc4,.45,.15),ink=M(0x1a1612,.6,.3);
+ivory.side=2;
+const TAU=Math.PI*2,fr=x=>x-Math.floor(x);
+function ext(shape,th,mat){const g=new THREE.ExtrudeGeometry(shape,{depth:th,bevelEnabled:true,bevelThickness:.012,bevelSize:.012,bevelSegments:1,curveSegments:20});g.translate(0,0,-th/2);return new THREE.Mesh(g,mat);}
+function holes(s,ri){const h=new THREE.Path();h.absarc(0,0,.05,0,TAU,true);s.holes.push(h);
+ if(ri>.6){const hub=.2,rim=ri-.12,n=5,w=.07;for(let k=0;k<n;k++){const a0=k*TAU/n,a1=(k+1)*TAU/n,p=new THREE.Path();
+  p.absarc(0,0,rim,a0+w/rim,a1-w/rim,false);p.absarc(0,0,hub,a1-w/hub,a0+w/hub,true);s.holes.push(p);}}}
+function gearShape(z,m){const r=m*z/2,ro=r+m,ri=r-1.25*m,s=new THREE.Shape(),st=TAU/z;
+ for(let i=0;i<z;i++){const a=i*st;[[ri,-.27],[ro,-.12],[ro,.12],[ri,.27]].forEach(([rr,f],j)=>{const x=rr*Math.cos(a+f*st),y=rr*Math.sin(a+f*st);(i||j)?s.lineTo(x,y):s.moveTo(x,y);});}
+ holes(s,ri);return s;}
+function escShape(){const z=30,R1=.7,r0=.58,s=new THREE.Shape(),st=TAU/z;
+ for(let i=0;i<z;i++){const a=i*st;[[r0,-.5],[R1,0],[R1-.03,.1],[r0,.25]].forEach(([rr,f],j)=>{const x=rr*Math.cos(a+f*st),y=rr*Math.sin(a+f*st);(i||j)?s.lineTo(x,y):s.moveTo(x,y);});}
+ holes(s,r0);return s;}
+function bar(x1,y1,x2,y2,w,d,mat){const dx=x2-x1,dy=y2-y1,m=new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(dx,dy),w,d),mat);m.position.set((x1+x2)/2,(y1+y2)/2,0);m.rotation.z=Math.atan2(dy,dx);return m;}
+function cyl(r,h,mat){const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,20),mat);m.rotation.x=Math.PI/2;return m;}
+// ---- gear train: every angle is a function of the escapement step s ----
+const G={};
+G.E={z:30,x:0,y:2,lz:.9,th:s=>-s*Math.PI/30};// escape wheel: half a tooth (6deg) per tick, 1 rev / 60 s
+G.E.mesh=ext(escShape(),.07,steel);
+const defs=[
+ ['p10',10,.06,'E','c',0,.3,.16,steel],
+ ['w60',60,.06,'p10','m',-60,.3,.08,brass],   // 60/10 = 6
+ ['p8',8,.06,'w60','c',0,.62,.16,steel],
+ ['w80',80,.06,'p8','m',-150,.62,.08,brass],  // 80/8 = 10 -> minute arbor turns 1/60 of seconds
+ ['c60',60,.04,'E','c',0,0,.08,brass2],
+ ['i30',30,.04,'c60','m',30,0,.08,brass],     // idler reverses direction
+ ['p12',12,.04,'i30','m',60,0,.1,brass2]];    // cam arbor: x5 seconds = 30deg per tick
+for(const [id,z,m,par,mode,ad,lz,th,mat] of defs){const p=G[par],g={z,lz};
+ if(mode==='c'){g.x=p.x;g.y=p.y;g.th=p.th;}
+ else{const a=ad*Math.PI/180,d=m*(p.z+z)/2,c=a+Math.PI-Math.PI/z+(p.z/z)*a;g.x=p.x+d*Math.cos(a);g.y=p.y+d*Math.sin(a);g.th=s=>-p.th(s)*p.z/z+c;}
+ g.mesh=ext(gearShape(z,m),th,mat);G[id]=g;}
+const rig=new THREE.Group();S.add(rig);
+for(const k in G){const g=G[k];g.mesh.position.set(g.x,g.y,g.lz);rig.add(g.mesh);}
+// plate, pillars, arbors
+const plate=new THREE.Mesh(new THREE.BoxGeometry(9.6,9.6,.15),plateM);plate.position.set(.4,.6,-1);rig.add(plate);
+for(const [x,y] of [[-4,-3.8],[4.8,-3.8],[-4,5],[4.8,5]]){const c=cyl(.12,2.4,brass2);c.position.set(x,y,.15);rig.add(c);}
+const P={x:0,y:2.95};
+for(const [g,top] of [[G.E,1.4],[G.w60,.75],[G.w80,1.45],[G.i30,.12],[G.p12,.5],[P,1]]){const h=top+1,c=cyl(.045,h,steel);c.position.set(g.x,g.y,top-h/2);rig.add(c);}
+// anchor + pendulum (share the pallet arbor)
+const anchor=new THREE.Group();anchor.position.set(P.x,P.y,.9);rig.add(anchor);
+const px=.388,py=-.416;
+anchor.add(bar(0,0,-px,py,.07,.06,steel),bar(0,0,px,py,.07,.06,steel),bar(-.25,.18,.25,.18,.06,.06,steel));
+for(const sx of[-1,1]){const pl=bar(sx*px,py,sx*px*.82,py*.82,.05,.08,blue);pl.scale.x=2;anchor.add(pl);}
+const hubA=cyl(.1,.1,brass);anchor.add(hubA);
+const pend=new THREE.Group();pend.position.set(P.x,P.y,-.55);rig.add(pend);
+pend.add(bar(0,0,0,-6,.05,.03,steel));const bob=cyl(.45,.14,brass);bob.position.y=-6;pend.add(bob);
+const bobR=cyl(.3,.16,brass2);bobR.position.y=-6;pend.add(bobR);
+// dials
+function dial(x,y,lz,R1,R2){const g=new THREE.Group();g.position.set(x,y,lz);
+ g.add(new THREE.Mesh(new THREE.RingGeometry(R1,R2,96),ivory));
+ for(let i=0;i<60;i++){const a=i*TAU/60,l=i%5?.05:.11,t=new THREE.Mesh(new THREE.BoxGeometry(i%5?.015:.03,l,.01),ink);
+  t.position.set(Math.sin(a)*(R2-l/2-.01),Math.cos(a)*(R2-l/2-.01),.01);t.rotation.z=-a;g.add(t);}
+ const ring=new THREE.Mesh(new THREE.TorusGeometry(R2,.025,8,96),brass);g.add(ring);rig.add(g);}
+dial(G.E.x,G.E.y,1.25,.8,.98);dial(G.w80.x,G.w80.y,1.25,1.6,1.9);
+function hand(x,y,z,len,w,tail){const g=new THREE.Group();g.position.set(x,y,z);g.add(bar(0,-tail,0,len,w,.02,blue));
+ const c=cyl(w*1.6,.04,blue);g.add(c);rig.add(g);return g;}
+const secH=hand(G.E.x,G.E.y,1.33,.9,.03,.22),minH=hand(G.w80.x,G.w80.y,1.37,1.75,.06,.35);
+const minBase=G.w80.th(0);
+// cam (12 sawtooth lobes) on the p12 arbor
+const D=G.p12,r0=.3,h=.13,lobe=Math.PI/6,k0=Math.PI/2-D.th(0);
+const cs=new THREE.Shape();
+for(let k=0;k<12;k++)for(let j=0;j<=8;j++){const a=k0+k*lobe+j/8*lobe*.995,r=r0+h*j/8,x=r*Math.cos(a),y=r*Math.sin(a);(k||j)?cs.lineTo(x,y):cs.moveTo(x,y);}
+const camM=ext(cs,.1,steel);camM.position.set(D.x,D.y,.4);rig.add(camM);
+// lever: follower roller on the cam, hammer on the far end
+const rr=.06,Lp={x:D.x+.75,y:D.y+r0+rr},lever=new THREE.Group();lever.position.set(Lp.x,Lp.y,.4);rig.add(lever);
+lever.add(bar(-.75,0,1,0,.05,.05,brass2));const roll=cyl(rr,.08,steel);roll.position.x=-.75;lever.add(roll);
+const head=new THREE.Mesh(new THREE.SphereGeometry(.08,16,12),steel);head.position.x=1;head.scale.set(1.4,1,1);lever.add(head);
+const piv=cyl(.07,.12,brass);lever.add(piv);
+const lpost=cyl(.04,1.4,steel);lpost.position.set(Lp.x,Lp.y,-.3);rig.add(lpost);
+const bell=new THREE.Group();bell.position.set(Lp.x+1.36,Lp.y+.08+.55,.4);rig.add(bell);
+const prof=[[0,.55],[.1,.55],[.18,.48],[.22,.32],[.27,.14],[.36,.03],[.38,0],[.35,.01]].map(([a,b])=>new THREE.Vector2(a,b));
+const bellMat=M(0xe0b25a,.18);bellMat.side=2;const bm=new THREE.Mesh(new THREE.LatheGeometry(prof,40),bellMat);bm.position.y=-.55;bell.add(bm);
+const bpost=bar(0,0,0,.7,.05,.05,steel);bell.add(bpost);
+const bk=bar(Lp.x+1.36,Lp.y+1.33,Lp.x+1.36,Lp.y+1.33,.01,.01,steel);
+const bstay=cyl(.04,1.4,steel);bstay.position.set(Lp.x+1.36,Lp.y+1.33,-.3);rig.add(bstay);
+// ---- animation: one master angle drives everything ----
+const AMP=.11,DUR=.15,t0=performance.now()/1000-7*60-12;
+function size(){cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();R.setSize(innerWidth,innerHeight);}
+addEventListener('resize',size);
+R.setAnimationLoop(()=>{
+ const t=performance.now()/1000-t0;
+ const MA=Math.PI*t;                       // master angle: seconds pendulum, one beat per second
+ const pa=AMP*Math.sin(MA);
+ pend.rotation.z=pa;anchor.rotation.z=pa;
+ const u=MA/Math.PI+.4,n=Math.floor(u),f=u-n;
+ const e=Math.min(f/DUR,1),step=n+e*e*(3-2*e); // escape wheel released on each beat
+ for(const k in G)G[k].mesh.rotation.z=G[k].th(step);
+ secH.rotation.z=G.E.th(step);
+ minH.rotation.z=G.w80.th(step)-minBase;
+ const thD=D.th(step);camM.rotation.z=thD;
+ const lift=h*fr((Math.PI/2-thD-k0)/lobe+1e-4); // follower reads the cam profile at 12 o'clock
+ lever.rotation.z=-lift/.75;
+ let age=f-DUR;if(age<0)age+=1;              // time since the hammer fell
+ const ring=Math.exp(-age*5);
+ bell.rotation.z=.05*ring*Math.sin(age*55);
+ bellMat.emissive.setRGB(.5*ring*ring,.3*ring*ring,.05*ring*ring);
+ const d=13.5*Math.max(1,1.15/cam.aspect),tt=t*.5;
+ cam.position.set(.4+Math.sin(tt*.13)*3.2,.6+Math.sin(tt*.09)*1.2,d+Math.sin(tt*.07)*.8);
+ cam.lookAt(.4,.4,.2);
+ R.render(S,cam);
+});
+</script>
+</body></html>

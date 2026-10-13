@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rube-Goldberg Chain Reaction</title>
+<style>
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111827;font-family:Arial,Helvetica,sans-serif}
+  canvas{display:block;width:100vw;height:100vh}
+  #hud{position:fixed;left:14px;top:12px;color:#fff;text-shadow:0 2px 6px #000;pointer-events:none;z-index:3}
+  #hud h1{font-size:20px;margin:0 0 8px 0;letter-spacing:.4px}
+  #stages{display:flex;gap:7px;flex-wrap:wrap}
+  .pill{display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.48);border:2px solid rgba(255,255,255,.28);border-radius:999px;padding:5px 10px 5px 5px;font-size:13px;color:#cbd5e1;transition:all .2s}
+  .num{width:23px;height:23px;border-radius:50%;background:#475569;color:#fff;display:grid;place-items:center;font-weight:700}
+  .pill.active{border-color:#fde047;color:#fff;background:rgba(113,63,18,.82);box-shadow:0 0 18px #facc15;transform:scale(1.06)}
+  .pill.active .num{background:#eab308;color:#111}
+  .pill.done{border-color:#4ade80;color:#dcfce7;background:rgba(20,83,45,.72)}
+  .pill.done .num{background:#22c55e;color:#052e16}
+  #fade{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;z-index:2}
+  #bar{position:fixed;left:0;bottom:0;height:5px;background:#facc15;width:0%;z-index:3}
+</style>
+</head>
+<body>
+<div id="hud">
+  <h1>RUBE-GOLDBERG CHAIN REACTION</h1>
+  <div id="stages">
+    <div class="pill"><span class="num">1</span>Dominoes</div>
+    <div class="pill"><span class="num">2</span>Ball &amp; Ramp</div>
+    <div class="pill"><span class="num">3</span>Seesaw Launch</div>
+    <div class="pill"><span class="num">4</span>Block Stack</div>
+    <div class="pill"><span class="num">5</span>Lamp + Flag</div>
+  </div>
+</div>
+<div id="fade"></div><div id="bar"></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const LOOP = 10.5;
+const stageStarts = [0.0, 3.30, 4.65, 5.52, 6.45];
+const pills = [...document.querySelectorAll('.pill')];
+const fadeEl = document.getElementById('fade');
+const barEl = document.getElementById('bar');
+
+const clamp01 = v => Math.max(0, Math.min(1, v));
+const seg = (t,a,b) => clamp01((t-a)/(b-a));
+const lerp = (a,b,p) => a+(b-a)*p;
+const easeIn = p => p*p;
+const easeOut = p => 1-Math.pow(1-p,3);
+const easeInOut = p => p<.5 ? 2*p*p : 1-Math.pow(-2*p+2,2)/2;
+const easeOutBack = p => { const c=1.70158, c3=c+1; return 1+c3*Math.pow(p-1,3)+c*Math.pow(p-1,2); };
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87b7d9);
+scene.fog = new THREE.Fog(0x87b7d9, 18, 42);
+
+const camera = new THREE.PerspectiveCamera(48, innerWidth/innerHeight, .1, 100);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x335533, 1.0));
+const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+sun.position.set(4,11,7);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-13; sun.shadow.camera.right=13;
+sun.shadow.camera.top=11; sun.shadow.camera.bottom=-8;
+sun.shadow.camera.near=1; sun.shadow.camera.far=30;
+sun.shadow.bias=-0.0004;
+scene.add(sun);
+
+function mat(color, rough=.65, metal=0){ return new THREE.MeshStandardMaterial({color,roughness:rough,metalness:metal}); }
+function box(w,h,d,color,x=0,y=0,z=0,parent=scene){
+  const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat(color));
+  m.position.set(x,y,z); m.castShadow=true; m.receiveShadow=true; parent.add(m); return m;
+}
+function cyl(rt,rb,h,color,x=0,y=0,z=0,parent=scene,segN=20){
+  const m=new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,segN), mat(color,.55,.15));
+  m.position.set(x,y,z); m.castShadow=true; m.receiveShadow=true; parent.add(m); return m;
+}
+function ball(r,color){
+  const m=new THREE.Mesh(new THREE.SphereGeometry(r,28,20), mat(color,.32,.05));
+  m.castShadow=true; m.receiveShadow=true; scene.add(m); return m;
+}
+
+// Ground
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(52,30), mat(0x5d9c59,.9));
+ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; scene.add(ground);
+const grid = new THREE.GridHelper(40,40,0xffffff,0x9db89d);
+grid.position.y=.01; grid.material.transparent=true; grid.material.opacity=.18; scene.add(grid);
+
+// Raised platform for dominoes (top y = 1.6)
+box(7.9,.18,4.2,0x9c6b3f,-3.65,1.51,.15);
+[[-7.3,-1.7],[-.1,-1.7],[-7.3,2.0],[-.1,2.0]].forEach(([x,z])=>box(.28,1.42,.28,0x6b4423,x,.71,z));
+
+// ---- Stage 1: 14 dominoes on a cubic Bezier curve ----
+const P=[new THREE.Vector2(-6.9,-1.1),new THREE.Vector2(-5.0,1.7),new THREE.Vector2(-2.5,.2),new THREE.Vector2(-.7,.2)];
+function bez(u){
+  const v=1-u;
+  return new THREE.Vector2()
+    .addScaledVector(P[0],v*v*v).addScaledVector(P[1],3*v*v*u)
+    .addScaledVector(P[2],3*v*u*u).addScaledVector(P[3],u*u*u);
+}
+function bezTan(u){
+  const v=1-u;
+  return new THREE.Vector2()
+    .addScaledVector(P[1].clone().sub(P[0]),3*v*v)
+    .addScaledVector(P[2].clone().sub(P[1]),6*v*u)
+    .addScaledVector(P[3].clone().sub(P[2]),3*u*u);
+}
+const dominoes=[];
+for(let i=0;i<14;i++){
+  const u=i/13, p=bez(u), tg=bezTan(u);
+  const outer=new THREE.Group(); outer.position.set(p.x,1.6,p.y);
+  outer.rotation.y=Math.atan2(tg.x,tg.y);
+  const pivot=new THREE.Group(); pivot.position.z=.08; outer.add(pivot);
+  const color=new THREE.Color().setHSL(i/14,.78,.55);
+  const m=new THREE.Mesh(new THREE.BoxGeometry(.5,1.1,.15),
+    new THREE.MeshStandardMaterial({color,roughness:.45}));
+  m.position.set(0,.55,-.08); m.castShadow=true; m.receiveShadow=true; pivot.add(m);
+  // white dot stripe
+  const dot=new THREE.Mesh(new THREE.BoxGeometry(.52,.09,.17),mat(0xffffff,.4));
+  dot.position.set(0,.88,-.08); dot.castShadow=true; pivot.add(dot);
+  scene.add(outer);
+  dominoes.push({pivot,start:.35+i*.21});
+}
+
+// ---- Stage 2: ramp ----
+const ramp=new THREE.Group();
+ramp.position.set(1.8,1.11,.2); ramp.rotation.z=-.295; scene.add(ramp);
+box(3.24,.12,.92,0xd97706,0,0,0,ramp);
+box(3.24,.16,.07,0x92400e,0,.1,.50,ramp);
+box(3.24,.16,.07,0x92400e,0,.1,-.50,ramp);
+box(.18,1.35,.7,0x6b4423,1.0,.67,.2);
+box(.18,.87,.7,0x6b4423,2.6,.43,.2);
+
+const ball1=ball(.26,0xef4444);
+
+// ---- Stage 3: seesaw ----
+const fulcrum=new THREE.Mesh(new THREE.ConeGeometry(.38,.42,4),mat(0x334155,.5,.2));
+fulcrum.position.set(4.2,.21,.2); fulcrum.rotation.y=Math.PI/4;
+fulcrum.castShadow=true; fulcrum.receiveShadow=true; scene.add(fulcrum);
+const seesaw=new THREE.Group(); seesaw.position.set(4.2,.38,.2); scene.add(seesaw);
+box(2.4,.10,.72,0xf59e0b,0,0,0,seesaw);
+box(.55,.08,.72,0xdc2626,-1.03,.08,0,seesaw);       // left pad (ball1 lands here)
+box(.08,.22,.72,0xdc2626,-1.3,.14,0,seesaw);        // left lip
+box(.55,.08,.72,0x2563eb, 1.03,.08,0,seesaw);       // right pad (ball2 sits here)
+box(.08,.22,.72,0x2563eb, 1.3,.14,0,seesaw);        // right lip
+const ball2=ball(.22,0x3b82f6);
+
+function seesawAngle(t){
+  const p=seg(t,4.65,4.90);
+  return p<=0 ? -.22 : lerp(-.22,.32,easeOutBack(p));
+}
+function padPos(lx,ly,a){
+  return new THREE.Vector3(4.2+Math.cos(a)*lx-Math.sin(a)*ly,
+                           .38+Math.sin(a)*lx+Math.cos(a)*ly, .2);
+}
+
+// ---- Stage 4: block pyramid ----
+const blockDefs=[
+  // start, end, delay, arc, rotX, rotZ, color
+  [[7.7,.28,-.38],[8.05,.30,-1.05],.22,.05, .2, 1.2,0xf97316],
+  [[7.7,.28, .20],[8.65,.28, .25],.08,.18, .6, .4,0x84cc16],
+  [[7.7,.28, .78],[8.05,.30, 1.45],.22,.05,-.2,-1.2,0xf97316],
+  [[7.7,.84,-.09],[8.85,.28,-.55],.00,.55,1.4, .8,0xa855f7],
+  [[7.7,.84, .49],[8.80,.28, 1.00],.03,.55,1.2,-.9,0x06b6d4],
+  [[7.7,1.40,.20],[9.05,.55, .20],.05,.85,2.2, .5,0xec4899], // top -> lands on button
+];
+const blocks=blockDefs.map(([s,e,d,arc,rx,rz,c])=>{
+  const m=box(.54,.54,.54,c,s[0],s[1],s[2]);
+  return {m,s:new THREE.Vector3(...s),e:new THREE.Vector3(...e),d,arc,rx,rz};
+});
+
+// Big red button the top block lands on
+cyl(.48,.55,.16,0x1f2937,9.05,.08,.2);
+const buttonTop=cyl(.42,.42,.14,0xef4444,9.05,.22,.2);
+
+// ---- Stage 5: lamp + flag ----
+cyl(.06,.09,2.0,0x1f2937,8.9,1.0,-1.15);
+cyl(.30,.36,.08,0x1f2937,8.9,.04,-1.15);
+const bulbMat=new THREE.MeshStandardMaterial({color:0xfef3c7,emissive:0xffbb33,emissiveIntensity:0,roughness:.25});
+const bulb=new THREE.Mesh(new THREE.SphereGeometry(.22,24,18),bulbMat);
+bulb.position.set(8.9,2.14,-1.15); bulb.castShadow=true; scene.add(bulb);
+const lampLight=new THREE.PointLight(0xffc966,0,9,1.4);
+lampLight.position.copy(bulb.position); scene.add(lampLight);
+// glow sprite
+(function(){})();
+const gc=document.createElement('canvas'); gc.width=gc.height=128;
+const gg=gc.getContext('2d'); const grad=gg.createRadialGradient(64,64,2,64,64,64);
+grad.addColorStop(0,'rgba(255,220,120,.95)'); grad.addColorStop(1,'rgba(255,220,120,0)');
+gg.fillStyle=grad; gg.fillRect(0,0,128,128);
+const glow=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(gc),transparent:true,opacity:0,depthWrite:false}));
+glow.position.copy(bulb.position); glow.scale.set(.1,.1,1); scene.add(glow);
+
+cyl(.045,.045,3.0,0xe5e7eb,9.3,1.5,1.35);
+const finial=ball(.09,0xfacc15); finial.position.set(9.3,3.05,1.35);
+const flagGroup=new THREE.Group(); flagGroup.position.set(9.3,.75,1.35); scene.add(flagGroup);
+const flagGeo=new THREE.PlaneGeometry(1.15,.68,12,4); flagGeo.translate(.575,0,0);
+const flagBase=flagGeo.attributes.position.array.slice();
+const flag=new THREE.Mesh(flagGeo,new THREE.MeshStandardMaterial({color:0xdc2626,side:THREE.DoubleSide,roughness:.6}));
+flag.castShadow=true; flagGroup.add(flag);
+
+// Numbered 3D stage labels (sprites)
+function numSprite(n,x,y,z){
+  const c=document.createElement('canvas'); c.width=c.height=128;
+  const g=c.getContext('2d');
+  g.beginPath(); g.arc(64,64,56,0,7); g.fillStyle='#fff'; g.fill();
+  g.lineWidth=9; g.strokeStyle='#111827'; g.stroke();
+  g.fillStyle='#111827'; g.font='bold 64px Arial'; g.textAlign='center'; g.textBaseline='middle';
+  g.fillText(String(n),64,68);
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),transparent:true}));
+  s.position.set(x,y,z); s.scale.set(.72,.72,1); scene.add(s); return s;
+}
+const stageSprites=[
+  numSprite(1,-3.7,3.55,.1), numSprite(2,1.7,2.85,.2), numSprite(3,4.2,2.15,.2),
+  numSprite(4,7.7,2.65,.2), numSprite(5,9.1,3.85,.1)
+];
+
+// Camera keyframes: [time, focus, offset]
+const camKeys=[
+  [0.0, new THREE.Vector3(-4.6,1.8,0),  new THREE.Vector3(2.0,3.2,7.6)],
+  [3.3, new THREE.Vector3(-0.7,1.7,.2), new THREE.Vector3(2.4,2.7,6.4)],
+  [4.65,new THREE.Vector3(3.1,1.0,.2),  new THREE.Vector3(1.6,2.6,6.0)],
+  [5.52,new THREE.Vector3(6.1,1.0,.2),  new THREE.Vector3(1.4,2.6,6.4)],
+  [6.6, new THREE.Vector3(8.4,1.1,.2),  new THREE.Vector3(1.0,2.4,6.4)],
+  [8.2, new THREE.Vector3(7.6,1.35,0),  new THREE.Vector3(3.0,3.6,8.6)],
+  [10.5,new THREE.Vector3(7.6,1.35,0),  new THREE.Vector3(3.0,3.6,8.6)],
+];
+function updateCamera(t){
+  let i=0; while(i<camKeys.length-2 && t>camKeys[i+1][0]) i++;
+  const [t0,f0,o0]=camKeys[i], [t1,f1,o1]=camKeys[i+1];
+  const p=easeInOut(seg(t,t0,t1));
+  const focus=f0.clone().lerp(f1,p), off=o0.clone().lerp(o1,p);
+  camera.position.copy(focus).add(off);
+  camera.lookAt(focus);
+}
+
+// ---- Deterministic animation from loop time t (auto-resets every loop) ----
+function update(t, elapsed){
+  // Stage 1: dominoes topple in order
+  dominoes.forEach((d,i)=>{
+    let p=seg(t,d.start,d.start+.38);
+    let ang=1.45*Math.pow(p,1.5);
+    if(i===0 && p===0 && t<d.start) ang=Math.sin(elapsed*18)*.035*(t/d.start); // starter wobble
+    d.pivot.rotation.x=ang;
+  });
+
+  // Stage 2: ball1 knocked by last domino, rolls down ramp onto seesaw pad
+  const A=new THREE.Vector3(-.15,1.86,.2), B=new THREE.Vector3(.30,1.86,.2), C=new THREE.Vector3(3.27,.94,.2);
+  const a=seesawAngle(t); seesaw.rotation.z=a;
+  if(t<3.30){
+    ball1.position.copy(A); ball1.rotation.z=0;
+  } else if(t<4.65){
+    const d=easeIn(seg(t,3.30,4.65))*3.56;                 // accelerates downhill
+    if(d<.45) ball1.position.lerpVectors(A,B,d/.45);
+    else ball1.position.lerpVectors(B,C,(d-.45)/3.11);
+    ball1.rotation.z=-d/.26;
+  } else {
+    ball1.position.copy(padPos(-1.03,.34,a));              // rides the pad down
+    ball1.rotation.z=-3.56/.26;
+  }
+
+  // Stage 3: ball2 rides pad, is launched, flies, bounces
+  if(t<4.82){
+    ball2.position.copy(padPos(1.03,.27,a)); ball2.rotation.z=0;
+  } else if(t<5.52){
+    const f=t-4.82;
+    ball2.position.set(5.07+3.3*f, 1.00+2.7*f-3.5*f*f, .2);
+    ball2.rotation.z=-f*9;
+  } else {
+    const b=t-5.52;
+    const y=Math.max(.22, 1.14+.8*b-3.5*b*b);
+    ball2.position.set(7.40-.9*Math.min(b,.8)-.18*Math.max(0,b-.8), y, .2);
+    ball2.rotation.z=-6.3+b*3;
+  }
+
+  // Stage 4: blocks tumble (top block flies onto the button)
+  blocks.forEach(bl=>{
+    const p=easeOut(seg(t,5.52+bl.d,5.52+bl.d+.75));
+    bl.m.position.lerpVectors(bl.s,bl.e,p);
+    bl.m.position.y+=Math.sin(Math.PI*p)*bl.arc;
+    bl.m.rotation.set(bl.rx*p,0,bl.rz*p);
+  });
+
+  // Stage 5: button pressed -> lamp lights, flag rises & waves
+  const on=easeOut(seg(t,6.45,6.75));
+  buttonTop.position.y=.22-.07*on;
+  bulbMat.emissiveIntensity=2.6*on;
+  lampLight.intensity=26*on;
+  glow.material.opacity=.9*on;
+  const gs=.1+2.1*on; glow.scale.set(gs,gs,1);
+  const raise=easeInOut(seg(t,6.45,7.95));
+  flagGroup.position.y=lerp(.75,2.58,raise);
+  const pos=flagGeo.attributes.position, wave=.25+.75*raise;
+  for(let i=0;i<pos.count;i++){
+    const x=flagBase[i*3];
+    pos.setZ(i, Math.sin(x*6-elapsed*7)*.09*(x/1.15)*wave);
+  }
+  pos.needsUpdate=true;
+
+  // Stage indicators (HTML pills + 3D numbers)
+  let cur=-1; stageStarts.forEach((s,i)=>{ if(t>=s) cur=i; });
+  pills.forEach((el,i)=>{
+    el.className='pill'+(i<cur?' done':i===cur?' active':'');
+  });
+  stageSprites.forEach((s,i)=>{
+    s.material.color.setHex(i<cur?0x77ff99:i===cur?0xffdd33:0x8a8a8a);
+    const sc=i===cur?.98:.72; s.scale.set(sc,sc,1);
+  });
+
+  updateCamera(t);
+  barEl.style.width=(t/LOOP*100)+'%';
+  fadeEl.style.opacity = t>10.3 ? String((t-10.3)/.2*.75) : (t<.2 ? String((.2-t)/.2*.75) : '0');
+}
+
+const clock=new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const elapsed=clock.getElapsedTime();
+  update(elapsed%LOOP, elapsed);
+  renderer.render(scene,camera);
+}
+animate();
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>

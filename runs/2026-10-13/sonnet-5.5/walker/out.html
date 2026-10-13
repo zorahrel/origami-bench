@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Parkour Fighter</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#101018}
+canvas{display:block}
+#ph{position:fixed;top:18px;left:50%;transform:translateX(-50%);font:700 28px/1 system-ui,sans-serif;color:#fff;letter-spacing:4px;text-shadow:0 0 12px #f0a,0 2px 4px #000;pointer-events:none}
+</style></head><body><div id="ph">RUN</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+const R=new THREE.WebGLRenderer({antialias:true});
+R.setSize(innerWidth,innerHeight);R.setPixelRatio(Math.min(devicePixelRatio,2));
+R.shadowMap.enabled=true;R.shadowMap.type=THREE.PCFSoftShadowMap;
+document.body.appendChild(R.domElement);
+const S=new THREE.Scene();S.background=new THREE.Color(0x1a1a28);S.fog=new THREE.Fog(0x1a1a28,14,40);
+const C=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,.1,100);
+addEventListener('resize',()=>{R.setSize(innerWidth,innerHeight);C.aspect=innerWidth/innerHeight;C.updateProjectionMatrix()});
+S.add(new THREE.HemisphereLight(0x8899cc,0x222233,.6));
+const D=new THREE.DirectionalLight(0xffffff,1.6);D.position.set(5,12,6);D.castShadow=true;
+D.shadow.mapSize.set(2048,2048);D.shadow.radius=4;
+Object.assign(D.shadow.camera,{left:-12,right:12,top:12,bottom:-12,near:1,far:40});S.add(D);
+const PL=new THREE.PointLight(0xff3399,40,18);PL.position.set(0,3,0);S.add(PL);
+// floor checker
+const cv=document.createElement('canvas');cv.width=cv.height=512;const g=cv.getContext('2d');
+for(let i=0;i<8;i++)for(let j=0;j<8;j++){g.fillStyle=(i+j)%2?'#d8d8e0':'#30303c';g.fillRect(i*64,j*64,64,64)}
+const ft=new THREE.CanvasTexture(cv);ft.wrapS=ft.wrapT=THREE.RepeatWrapping;ft.repeat.set(4,4);ft.colorSpace=THREE.SRGBColorSpace;
+const fl=new THREE.Mesh(new THREE.PlaneGeometry(40,40),new THREE.MeshStandardMaterial({map:ft,roughness:.8}));
+fl.rotation.x=-Math.PI/2;fl.receiveShadow=true;S.add(fl);
+// striped wall at z=-4, spanning x -8..8 (wall-run along x), height 7
+const wc=document.createElement('canvas');wc.width=512;wc.height=64;const w=wc.getContext('2d');
+for(let i=0;i<16;i++){w.fillStyle=i%2?'#f5c518':'#c0392b';w.fillRect(i*32,0,32,64)}
+const wt=new THREE.CanvasTexture(wc);wt.colorSpace=THREE.SRGBColorSpace;
+const wall=new THREE.Mesh(new THREE.BoxGeometry(16,7,.6),new THREE.MeshStandardMaterial({map:wt,roughness:.7}));
+wall.position.set(0,3.5,-4.3);wall.castShadow=wall.receiveShadow=true;S.add(wall);
+// pillars for arena feel
+for(const x of[-9,9]){const p=new THREE.Mesh(new THREE.CylinderGeometry(.5,.5,6,16),new THREE.MeshStandardMaterial({color:0x445}));p.position.set(x,3,-2);p.castShadow=true;S.add(p)}
+// ---- fighter rig
+const skin=new THREE.MeshStandardMaterial({color:0xf0c8a0}),suit=new THREE.MeshStandardMaterial({color:0x2255cc}),dark=new THREE.MeshStandardMaterial({color:0x151520}),red=new THREE.MeshStandardMaterial({color:0xdd2244});
+function box(m,w,h,d,y,mat){const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);o.position.y=y;o.castShadow=true;return o}
+function J(parent,x,y,z){const j=new THREE.Group();j.position.set(x,y,z);parent.add(j);return j}
+const root=new THREE.Group();S.add(root);
+const body=new THREE.Group();root.add(body); // pivot at hips, y=1.0
+body.position.y=1;
+const hip=box(0,.4,.2,.25,0,dark);body.add(hip);
+const sp=J(body,0,.1,0);sp.add(box(0,.5,.6,.28,.3,suit));
+const neck=J(sp,0,.65,0);const head=box(0,.28,.3,.28,.15,skin);neck.add(head);
+const band=box(0,.3,.07,.3,.2,red);neck.add(band);
+function arm(s){const sh=J(sp,s*.36,.55,0);sh.add(box(0,.14,.34,.14,-.15,suit));
+ const el=J(sh,0,-.34,0);el.add(box(0,.12,.32,.12,-.15,skin));
+ const wr=J(el,0,-.32,0);wr.add(box(0,.14,.14,.14,-.05,red));return{sh,el,wr}}
+function leg(s){const h=J(body,s*.14,-.08,0);h.add(box(0,.18,.46,.18,-.22,dark));
+ const kn=J(h,0,-.46,0);kn.add(box(0,.15,.46,.15,-.22,suit));
+ const an=J(kn,0,-.46,0);an.add(box(0,.16,.1,.3,-.05,red).translateZ(.06));return{h,kn,an}}
+const A=[arm(-1),arm(1)],L=[leg(-1),leg(1)]; // 0 left(-x) 1 right(+x)
+const sword=box(0,.05,1.1,.05,0,new THREE.MeshStandardMaterial({color:0xccddff,emissive:0x4466aa}));
+sword.position.set(0,-.1,.55);sword.rotation.x=Math.PI/2;A[1].wr.add(sword);sword.visible=false;
+// ---- animation
+const lerp=(a,b,t)=>a+(b-a)*t,cl=x=>Math.min(1,Math.max(0,x)),sm=x=>x*x*(3-2*x);
+const P=[['RUN',0,2],['WALL RUN',2,4],['FLIP',4,5.2],['CROUCH',5.2,5.9],['PUNCH',5.9,6.7],['KICK',6.7,7.6],['SPIN KICK',7.6,8.8],['RESET',8.8,10]];
+const T=10;
+function pose(t){
+ // defaults
+ const q={x:0,y:0,z:0,ry:0,rx:0,rz:0,by:1,
+  sp:[0,0,0],nk:0,
+  a:[[0,0,0,0],[0,0,0,0]],l:[[0,0],[0,0]],f:[0,0]}; // arm: sx,sz,elbow,.. leg:hip,knee
+ return q}
+const jt={};
+function apply(t){
+ const p=t;let ph='RUN';for(const e of P)if(t>=e[1]&&t<e[2])ph=e[0];
+ let x=0,y=0,z=0,ry=0,rx=0,rz=0,by=1,spx=0,spy=0;
+ let aS=[0,0],aE=[0,0],aZ=[.1,.1],lH=[0,0],lK=[0,0];
+ const cyc=(f)=>Math.sin(t*f);
+ if(t<2){ // run from (-6,0,4) toward wall point; face -x? run along +x toward wall corner then turn
+  const u=t/2;x=lerp(-6,-4,u);z=lerp(3,-2.4,u);ry=Math.atan2(2,5.4)+Math.PI; // face movement direction
+  ry=Math.atan2(x-(-6),z-3)*0;ry=Math.atan2(2,-5.4);
+  const c=t*14;lH=[Math.sin(c)*1,-Math.sin(c)*1];lK=[Math.max(0,-Math.sin(c))*1.4+.2,Math.max(0,Math.sin(c))*1.4+.2];
+  aS=[-Math.sin(c)*1,Math.sin(c)*1];aE=[-1.2,-1.2];rx=.25;by=.98+Math.abs(Math.cos(c))*.06;spx=.15;
+ } else if(t<4){ // wall run along +x, on wall z=-4
+  const u=(t-2)/2;x=lerp(-4,4,u);z=-3.75;y=lerp(1,2.6,Math.sin(u*Math.PI/2));ry=Math.PI/2*1;
+  rz=0;rx=0; // body tilt: lean into wall (face +x, feet on wall at -z)
+  by=0; // handled below
+  const c=t*12;lH=[Math.sin(c)*1.1,-Math.sin(c)*1.1];lK=[Math.max(0,-Math.sin(c))*1.5+.3,Math.max(0,Math.sin(c))*1.5+.3];
+  aS=[Math.sin(c)*.8,-Math.sin(c)*.8];aE=[-1,-1];
+ } else if(t<5.2){ // push off + flip, land at x=3,z=0
+  const u=(t-4)/1.2;x=lerp(4,3.5,u);z=lerp(-3.7,.5,sm(u));y=2.6+Math.sin(u*Math.PI)*1.8-2.6*sm(u)*sm(u)*sm(u)+0; ry=Math.PI/2;
+  rx=-u*Math.PI*2; // flip around local x axis
+  const tuck=Math.sin(cl(u*1.2)*Math.PI);lH=[-1.6*tuck,-1.6*tuck];lK=[2*tuck,2*tuck];aS=[-1.2*tuck,-1.2*tuck];aE=[-1.5*tuck,-1.5*tuck];spx=.4*tuck;
+ } else if(t<5.9){ // crouch
+  const u=cl((t-5.2)/.5);x=3.5;z=.5;y=0;ry=Math.PI/2+ -u*.6;by=lerp(.95,.55,sm(u));
+  lH=[-1.3*u,-1.3*u];lK=[2.2*u,2.2*u];spx=.5*u;aS=[-.5*u,-.5*u];aE=[-1.5*u,-1.5*u];aZ=[.4,.4];
+ } else if(t<8.8){
+  x=3.5;z=.5;y=0;ry=Math.PI/2-.6;by=.92;
+  let u;
+  if(t<6.7){u=(t-5.9)/.8;const s=Math.sin(cl(u)*Math.PI);by=.85;spx=.2;
+   lH=[.5,-.5];lK=[.5,.5];aS=[-.6,-1.5*s-.3];aE=[-1.8,-.1*s-.2];ry+=-s*.4;x+=-s*.1;
+   aS[0]=-.4;}
+  else if(t<7.6){u=(t-6.7)/.9;const s=Math.sin(cl(u)*Math.PI);
+   lH=[.2,-1.9*s];lK=[.3,.2];aS=[-.8,-.5];aE=[-1.6,-1.6];rx=-.4*s;spx=-.2*s;y=.1*s;by=.95;
+   lK[1]=.3+(1-s)*.3;}
+  else {u=(t-7.6)/1.2;const s=Math.sin(cl(u)*Math.PI);
+   ry+=u*Math.PI*2;lH=[.1,-1.5*s];lK=[.2,.1];aS=[-.2,-.2];aE=[-1,-1];aZ=[1.2*s,1.2*s];rx=-.15*s;y=.15*s;by=.95;
+   sword.visible=false;}
+ } else { // reset: walk back to start via fade-out; snap next loop
+  const u=(t-8.8)/1.2;x=lerp(3.5,-6,sm(u));z=lerp(.5,3,sm(u));ry=Math.atan2(-9.5,2.5)+0;ry=Math.atan2(x-3.5,0)*0+(-Math.PI/2);
+  ry=Math.atan2(-1,0)+0;ry=-Math.PI/2;
+  const c=t*10;lH=[Math.sin(c)*.8,-Math.sin(c)*.8];lK=[Math.max(0,-Math.sin(c))+.1,Math.max(0,Math.sin(c))+.1];aS=[-Math.sin(c)*.7,Math.sin(c)*.7];aE=[-.8,-.8];by=.98;
+ }
+ root.position.set(x,y,z);root.rotation.set(0,ry,0);
+ if(t>=2&&t<4){ // lean: feet on wall, body horizontal-ish toward wall
+  root.rotation.set(0,ry,0);root.rotateZ(0);
+  body.position.set(0,1,0);root.rotation.order='YXZ';
+  // wall is on character's... facing +x, wall at -z = character's left (rotation PI/2: local +x -> world -z? ) -> tilt about local z
+  root.rotation.z=1.25;
+ } else {root.rotation.order='YXZ';root.rotation.x=rx;root.rotation.z=0;body.position.y=(t>=5.2&&t<8.8)||t<2||t>=8.8?by:1}
+ if(t>=4&&t<5.2){body.position.y=1}
+ sp.rotation.x=spx;
+ for(let i=0;i<2;i++){
+  A[i].sh.rotation.set(aS[i],0,(i?-1:1)*aZ[i]);A[i].el.rotation.x=aE[i];
+  L[i].h.rotation.x=lH[i];L[i].kn.rotation.x=lK[i];L[i].an.rotation.x=-lK[i]*.3;
+ }
+ return {ph,x,y,z,ry}
+}
+// wall-run tilt fix: character facing +x has local -z... verify via ry=PI/2: local +z -> world +x; local +x -> world -z (toward wall). tilt rotation.z positive rolls local +x... set sign at runtime
+const cam=new THREE.Vector3(0,4,10),look=new THREE.Vector3();
+const clock=new THREE.Clock();const phEl=document.getElementById('ph');let lastPh='';
+function frame(){
+ const t=clock.getElapsedTime()%T;
+ const r=apply(t);
+ if(t>=2&&t<4)root.rotation.z=-1.25; // head away from wall? adjust: feet toward wall (-z world)
+ if(r.ph!==lastPh){phEl.textContent=r.ph;lastPh=r.ph}
+ const tgt=new THREE.Vector3(r.x,r.y+1.2,r.z);
+ let off;
+ switch(r.ph){
+  case'RUN':off=new THREE.Vector3(r.x-4,2,r.z+3);break;
+  case'WALL RUN':off=new THREE.Vector3(r.x-1,2.5,r.z+6);break;
+  case'FLIP':off=new THREE.Vector3(r.x+6,3,r.z+2);break;
+  case'CROUCH':off=new THREE.Vector3(r.x+1.5,.9,r.z+3);break;
+  case'PUNCH':off=new THREE.Vector3(r.x+3,1.6,r.z+3.5);break;
+  case'KICK':off=new THREE.Vector3(r.x-1,1.2,r.z+4.5);break;
+  case'SPIN KICK':off=new THREE.Vector3(r.x+3,3,r.z+3);break;
+  default:off=new THREE.Vector3(r.x+5,3,r.z+5);
+ }
+ if(t<.05){cam.copy(tgt).add(off);}
+ cam.lerp(tgt.clone().add(off),.04);look.lerp(tgt,.08);
+ C.position.copy(cam);C.lookAt(look);
+ PL.position.set(r.x,r.y+2.5,r.z+1);
+ R.render(S,C);requestAnimationFrame(frame);
+}
+frame();
+</script></body></html>

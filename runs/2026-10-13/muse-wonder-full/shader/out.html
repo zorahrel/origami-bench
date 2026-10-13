@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Raymarched SDF</title>
+<style>
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}
+canvas{display:block;width:100%;height:100%}
+</style>
+</head>
+<body>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}
+</script>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const renderer = new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.5));
+renderer.setSize(window.innerWidth,window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+
+const uniforms = {
+  uTime:{value:0},
+  uResolution:{value:new THREE.Vector2(1,1)}
+};
+
+const vertexShader = `
+varying vec2 vUv;
+void main(){
+  vUv = uv;
+  gl_Position = vec4(position.xy,0.0,1.0);
+}
+`;
+
+const fragmentShader = `
+varying vec2 vUv;
+uniform float uTime;
+uniform vec2 uResolution;
+
+mat2 rot(float a){
+  float c=cos(a), s=sin(a);
+  return mat2(c,-s,s,c);
+}
+float sdSphere(vec3 p,float r){ return length(p)-r; }
+float sdBox(vec3 p,vec3 b){
+  vec3 q=abs(p)-b;
+  return length(max(q,0.0))+min(max(q.x,max(q.y,q.z)),0.0);
+}
+float sdTorus(vec3 p,vec2 t){
+  vec2 q=vec2(length(p.xz)-t.x,p.y);
+  return length(q)-t.y;
+}
+float sdCapsule(vec3 p,vec3 a,vec3 b,float r){
+  vec3 pa=p-a, ba=b-a;
+  float h=clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0);
+  return length(pa-ba*h)-r;
+}
+float smin(float a,float b,float k){
+  float h=clamp(0.5+0.5*(b-a)/k,0.0,1.0);
+  return mix(b,a,h)-k*h*(1.0-h);
+}
+
+void primitiveDistances(vec3 p,out float d1,out float d2,out float d3,out float d4,out float d5,out float fd){
+  float t=uTime;
+  fd = p.y + 1.25;
+
+  vec3 sp = p - vec3(sin(t*0.9)*1.1, sin(t*1.7)*0.35, cos(t*0.7)*0.6);
+  d1 = sdSphere(sp,0.85);
+
+  vec3 tp = p - vec3(-1.4+sin(t*0.5)*0.4, 0.15+sin(t*1.2)*0.25, -0.4);
+  tp.xy = rot(t*0.8)*tp.xy;
+  tp.xz = rot(t*0.5)*tp.xz;
+  d2 = sdTorus(tp, vec2(0.75,0.28));
+
+  vec3 bp = p - vec3(1.5, -0.1+sin(t*1.1+1.0)*0.3, 0.5+cos(t*0.6)*0.4);
+  bp.xz = rot(t*0.7)*bp.xz;
+  bp.xy = rot(t*0.4)*bp.xy;
+  d3 = sdBox(bp, vec3(0.5)) - 0.07;
+
+  vec3 a = vec3(-0.3,-0.9,1.2);
+  vec3 b = vec3(-0.3+sin(t*1.3)*0.8, 0.9+cos(t*0.9)*0.3, 1.2+cos(t*1.1)*0.4);
+  d4 = sdCapsule(p,a,b,0.32);
+
+  d5 = sdSphere(p - vec3(cos(t*1.4)*1.8, 0.6+sin(t*2.0)*0.4, sin(t*1.4)*1.2), 0.38);
+}
+
+float map(vec3 p){
+  float d1,d2,d3,d4,d5,fd;
+  primitiveDistances(p,d1,d2,d3,d4,d5,fd);
+  float k = 0.45 + 0.25*sin(uTime*0.6);
+  float d = d1;
+  d = smin(d,d2,k);
+  d = smin(d,d3,k);
+  d = smin(d,d4,k);
+  d = smin(d,d5,k);
+  d = min(d,fd);
+  return d;
+}
+
+vec3 getAlbedo(vec3 p){
+  float d1,d2,d3,d4,d5,fd;
+  primitiveDistances(p,d1,d2,d3,d4,d5,fd);
+  float k = 0.45 + 0.25*sin(uTime*0.6);
+
+  float d = d1;
+  vec3 col = vec3(0.95,0.35,0.25);
+
+  float h;
+  h = clamp(0.5+0.5*(d2-d)/k,0.0,1.0); col = mix(vec3(0.25,0.65,1.0),col,h); d = mix(d2,d,h)-k*h*(1.0-h);
+  h = clamp(0.5+0.5*(d3-d)/k,0.0,1.0); col = mix(vec3(1.0,0.75,0.25),col,h); d = mix(d3,d,h)-k*h*(1.0-h);
+  h = clamp(0.5+0.5*(d4-d)/k,0.0,1.0); col = mix(vec3(0.35,0.95,0.55),col,h); d = mix(d4,d,h)-k*h*(1.0-h);
+  h = clamp(0.5+0.5*(d5-d)/k,0.0,1.0); col = mix(vec3(0.85,0.35,1.0),col,h); d = mix(d5,d,h)-k*h*(1.0-h);
+
+  if(fd < d){
+    float ch = mod(floor(p.x)+floor(p.z),2.0);
+    col = mix(vec3(0.10,0.11,0.14), vec3(0.22,0.24,0.30), ch);
+    float grid = smoothstep(0.95,1.0,abs(fract(p.x)-0.5)*2.0) + smoothstep(0.95,1.0,abs(fract(p.z)-0.5)*2.0);
+    col += clamp(grid,0.0,1.0)*vec3(0.05,0.08,0.12);
+  }
+  return col;
+}
+
+vec3 calcNormal(vec3 p){
+  vec2 e = vec2(1.0,-1.0)*0.002;
+  return normalize(e.xyy*map(p+e.xyy) + e.yyx*map(p+e.yyx) + e.yxy*map(p+e.yxy) + e.xxx*map(p+e.xxx));
+}
+
+float raymarch(vec3 ro, vec3 rd){
+  float t = 0.0;
+  for(int i=0;i<96;i++){
+    vec3 p = ro + rd*t;
+    float d = map(p);
+    if(d < 0.0015*t + 0.0005) break;
+    t += d*0.9;
+    if(t > 30.0){ t = -1.0; break; }
+  }
+  if(t > 30.0) t = -1.0;
+  return t;
+}
+
+float softShadow(vec3 ro, vec3 rd){
+  float res = 1.0;
+  float t = 0.02;
+  for(int i=0;i<32;i++){
+    float h = map(ro + rd*t);
+    if(h < 0.001) return 0.0;
+    res = min(res, 16.0*h/t);
+    t += clamp(h,0.02,0.25);
+    if(t > 12.0) break;
+  }
+  return clamp(res,0.0,1.0);
+}
+
+float calcAO(vec3 p, vec3 n){
+  float occ = 0.0;
+  float sca = 1.0;
+  for(int i=0;i<5;i++){
+    float h = 0.01 + 0.12*float(i)/4.0;
+    float d = map(p + n*h);
+    occ += (h-d)*sca;
+    sca *= 0.95;
+  }
+  return clamp(1.0 - 3.0*occ, 0.0, 1.0);
+}
+
+vec3 sky(vec3 rd, vec3 ld){
+  float y = max(rd.y,0.0);
+  vec3 col = mix(vec3(0.08,0.09,0.14), vec3(0.25,0.45,0.75), pow(y,0.6));
+  col = mix(col, vec3(0.90,0.60,0.35), pow(max(dot(rd,ld),0.0),8.0)*0.35);
+  col += vec3(1.0,0.85,0.6)*pow(max(dot(rd,ld),0.0),350.0)*3.0;
+  col += vec3(1.0,0.85,0.6)*pow(max(dot(rd,ld),0.0),24.0)*0.25;
+  return col;
+}
+
+vec3 shade(vec3 p, vec3 rd, vec3 n, vec3 albedo, vec3 ld){
+  float ao = calcAO(p,n);
+  float sh = softShadow(p + n*0.02, ld);
+  float dif = clamp(dot(n,ld),0.0,1.0)*sh;
+  vec3 hv = normalize(ld - rd);
+  float spec = pow(clamp(dot(n,hv),0.0,1.0),64.0)*sh;
+  float ndv = clamp(dot(n,-rd),0.0,1.0);
+  float fres = pow(1.0-ndv,5.0);
+  vec3 col = albedo*(0.20*ao + dif*vec3(1.0,0.9,0.75)*1.2);
+  col += spec*vec3(1.0)*0.6;
+  col += fres*vec3(0.40,0.60,1.0)*0.35*ao;
+  col += pow(1.0-abs(dot(n,-rd)),3.0)*vec3(0.20,0.35,0.60)*0.25;
+  return col;
+}
+
+vec3 aces(vec3 x){
+  return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0,1.0);
+}
+
+void main(){
+  vec2 uv = (2.0*gl_FragCoord.xy - uResolution)/uResolution.y;
+  float t = uTime;
+
+  vec3 ro = vec3(cos(t*0.25)*6.5, 2.0+sin(t*0.4)*0.7, sin(t*0.25)*6.5);
+  vec3 ta = vec3(0.0,0.1,0.0);
+  vec3 fw = normalize(ta-ro);
+  vec3 rt = normalize(cross(vec3(0.0,1.0,0.0),fw));
+  vec3 up = cross(fw,rt);
+  vec3 rd = normalize(uv.x*rt + uv.y*up + 1.8*fw);
+
+  vec3 ld = normalize(vec3(cos(t*0.3)*0.7,0.9,sin(t*0.3)*0.7));
+
+  vec3 col = sky(rd,ld);
+  float dt = raymarch(ro,rd);
+
+  if(dt > 0.0){
+    vec3 p = ro + rd*dt;
+    vec3 n = calcNormal(p);
+    vec3 alb = getAlbedo(p);
+    vec3 base = shade(p,rd,n,alb,ld);
+
+    float ndv = clamp(dot(n,-rd),0.0,1.0);
+    float fres = 0.04 + 0.96*pow(1.0-ndv,5.0);
+
+    vec3 rrd = reflect(rd,n);
+    vec3 rro = p + n*0.02;
+    float rt2 = raymarch(rro,rrd);
+    vec3 rcol = sky(rrd,ld);
+    if(rt2 > 0.0){
+      vec3 rp = rro + rrd*rt2;
+      vec3 rn = calcNormal(rp);
+      rcol = shade(rp,rrd,rn,getAlbedo(rp),ld);
+      rcol = mix(rcol, vec3(0.08,0.09,0.14), 1.0-exp(-0.03*rt2));
+    }
+
+    col = base + rcol*(0.08 + fres*0.55);
+    col = mix(col, vec3(0.08,0.09,0.14), 1.0-exp(-0.02*dt));
+  }
+
+  col = aces(col*1.15);
+  col = pow(col, vec3(0.4545));
+
+  vec2 q = gl_FragCoord.xy/uResolution;
+  col *= 0.5 + 0.5*pow(16.0*q.x*q.y*(1.0-q.x)*(1.0-q.y),0.15);
+
+  gl_FragColor = vec4(col,1.0);
+}
+`;
+
+const material = new THREE.ShaderMaterial({
+  uniforms:uniforms,
+  vertexShader:vertexShader,
+  fragmentShader:fragmentShader,
+  depthWrite:false,
+  depthTest:false
+});
+
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2,2),material);
+scene.add(quad);
+
+function resize(){
+  renderer.setSize(window.innerWidth,window.innerHeight);
+  const size = new THREE.Vector2();
+  renderer.getDrawingBufferSize(size);
+  uniforms.uResolution.value.copy(size);
+}
+window.addEventListener('resize',resize);
+resize();
+
+const clock = new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  uniforms.uTime.value = clock.getElapsedTime();
+  renderer.render(scene,camera);
+}
+animate();
+</script>
+</body>
+</html>

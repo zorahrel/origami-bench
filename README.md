@@ -14,47 +14,51 @@ No humans voting, no leaderboard to overfit to: four prompts you can read in a m
 | **Clockwork machine** | **Raymarched SDF** |
 | ![gears](docs/gears.gif) | ![shader](docs/shader.gif) |
 
-*Best-scoring output per task (all four: Sonnet 5.5).
+*Best-scoring output per task (walker: Muse Spark 1.3; the other three: Sonnet 5.5). **Every cell's own 10 s clip is on the [live page](https://zorahrel.github.io/origami-bench/)** (`runs/<date>/<model>/<task>/clip.mp4`, ≤ 300 KB each).
 
 ## Why few tokens?
 
 Anyone can get a good demo from 50k tokens of output. The interesting question is **density**: how much *working* complexity (articulated joints, collisions, shadows, ray-marched geometry) a model packs into a small budget **on the first try**, with no tools, no retries and no external assets. It is also a cheap proxy for "will this model one-shot a small, visual, self-checking piece of code?".
 
-## Leaderboard (run of 2026-10-12)
+## Leaderboard (run of 2026-10-13, hard tasks)
 
-Mean over 4 tasks. Score = video-judge rating 1-10 (fixed rubric, capped at 4 if no animation is detected).
+Mean over 4 tasks. Score = video-judge rating 1-10 (fixed rubric, capped at 4 if no animation is detected). **One judge for every row:** `judges/codex.py` (gpt-6-luna, 16 frames sampled from each 10 s video).
 
 | # | model | score | time (4 tasks) | output tokens | animated | clean |
 |---|---|---|---|---|---|---|
-| 1 | Claude Sonnet 5.5 | **7.2** | 163 s | 22,913\* | 4/4 | 4/4 |
-| 2 | Claude Opus 5.5 | 7.0 | 262 s | 26,983\* | 4/4 | 4/4 |
-| 3 | Muse Spark 1.3 | 6.5 | 252 s | ~8,155† | 4/4 | 4/4 |
-| 4 | Muse Wonder Full 1.0 | 6.2 | 258 s | ~8,929† | 4/4 | 4/4 |
-| 5 | gpt-6-luna | 6.0 | 1030 s | 59,987\* | 3/4 | 4/4 |
-| 6 | free-auto (free router) | 4.0 | 757 s | 15,062 | 3/4 | 3/4 |
+| 1 | Claude Sonnet 5.5 | **6.5** | 630 s | 80,284\* | 4/4 | 4/4 |
+| 2 | Muse Wonder Full 1.0 | 6.5 | 749 s | ~15,535† | 4/4 | 4/4 |
+| 3 | Muse Spark 1.3 | 6.2 | 213 s | ~10,259† | 4/4 | 4/4 |
+| 4 | Claude Opus 5.5 | 6.0 | 722 s | 70,328\* | 4/4 | 4/4 |
+| 5 | gpt-6-luna | 5.5 | 791 s | 107,748\* | 3/4 | 4/4 |
+| 6 | free-auto (free router) | 3.8 | 746 s | 22,814 | 2/4 | 3/4 |
+
+The previous run (2026-10-12, easy tasks, mostly a different judge for the Muse rows) is kept in [`results/2026-10-12.md`](results/2026-10-12.md) and [previous-run page](https://zorahrel.github.io/origami-bench/previous-run.html): the same models scored 4.0-7.2 there. Scores across the two runs are not directly comparable (different tasks, and a different judge for some rows).
 
 \* Counts include hidden reasoning tokens, which is why some cells are flagged "over budget" in the report even though every HTML file is under 16 KB. The budget in the prompt is a *request*; the harness reports the overshoot but does not discard the cell.
 † Estimated from characters (chars / 3.5) because that CLI does not expose usage.
 
-Full per-cell table with judge notes: [`results/2026-10-12.md`](results/2026-10-12.md). Every generated page is in `runs/2026-10-12/<model>/<task>/out.html`: open it in a browser.
+Full per-cell table with judge notes: [`results/2026-10-13.md`](results/2026-10-13.md). Every generated page is in `runs/2026-10-13/<model>/<task>/out.html`: open it in a browser.
 
 **Read it with care:** one run per cell, one judge, scores are noisy by roughly ±1. Differences below ~0.5 are a tie.
 
-## The four tasks
+## The four tasks (v2: chained sequences, not demos)
 
 | id | what the model must build |
 |---|---|
-| `walker` | Articulated humanoid (joint hierarchy, opposite arm/leg swing, knee/elbow bend, body bob) walking on a checkered floor, directional light with soft shadows, coloured point light, fog, orbiting camera |
-| `physics` | 150+ spheres dropped into a glass box with **no physics library**: sphere-sphere and wall collisions, restitution, friction, `InstancedMesh`, periodic box shake |
-| `gears` | 8+ procedurally generated meshing gears with correct ratios and counter-rotation in a layered 3D layout, pendulum, ticking second hand, metallic look |
-| `shader` | Full-screen raymarched SDF scene: morphing blob over an infinite floor, soft shadows, AO, fresnel glow, moving camera. Must compile first try |
+| `walker` | Articulated fighter (joint hierarchy) in a looping ~10 s parkour-combat sequence: run at a wall, **wall-run**, push off into a **flip**, land in a crouch, **3-hit combo** (punch, kick, spin kick / slash), reset. Following camera that changes angle per phase, soft shadows, coloured light, fog, on-screen phase name |
+| `physics` | **Rube-Goldberg chain** without a physics library: 12+ dominoes → ball down a ramp → lever/seesaw launches a second ball → stack of blocks falls → lamp lights / flag rises. Each stage must cause the next; numbered stage labels light up; tracking camera; auto-reset |
+| `gears` | **Clockwork automaton** driven by one master angle: 8+ gear train with correct ratios, anchor escapement + swinging pendulum, second/minute hands at 1:60, a cam-and-follower that fires a small figure (hammer + bell / bird) in sync with the ticks |
+| `shader` | Raymarched SDF scene: 4+ different primitives with **animated smooth-min blending** over a floor, soft shadows, AO, **one-bounce reflections**, fresnel glow, tone mapping, orbiting look-at camera. Must compile first try |
+
+Why 10 s videos (was 7 s): the walker and Rube-Goldberg prompts describe a sequence of 5-6 phases; in 7 s the judge would only see half of it. The 8,000-token budget is unchanged, which is the point: these prompts need real structure (state machines, timelines) that a model has to compress.
 
 All share one preamble: a single HTML file, three.js r170 from the CDN, no addons, no input, no console errors, under 8,000 tokens, raw HTML only.
 
 ## How a cell is scored
 
 1. **Generate**: the model's adapter runs the prompt; the HTML is extracted from the reply; time and tokens are recorded.
-2. **Render** (`render.py`): headless **WebKit** via Playwright, 640x400, 7 s video. `three.module.js` is served from `vendor/` so runs are offline-reproducible.
+2. **Render** (`render.py`): headless **WebKit** via Playwright, 640x400, 10 s video. `three.module.js` is served from `vendor/` so runs are offline-reproducible.
 3. **Automatic checks**: no console errors · canvas not blank (pixel std-dev and distinct levels) · **animation detected** = mean difference between 4 screenshots exceeds a threshold in at least 2 of 3 pairs.
 4. **Judge**: the video goes to a vision model with a fixed rubric (1-2 blank/broken/static · 3-4 poor or off-task · 5-6 recognisable, simple animation · 7-8 task met well with lights/shadows/depth · 9-10 surprising, near-professional). A blank page scores 1 without calling the judge; no detected animation caps the score at 4.
 
@@ -71,13 +75,15 @@ Requirements: Python 3.9+, `pip install playwright && playwright install webkit`
 ./bench run --no-judge                        # generation + automatic checks only
 ./bench report --date 2026-10-12              # rebuild results/<date>.md
 ./bench gifs   --date 2026-10-12              # best cell per task -> docs/*.gif
+./bench clips  --date 2026-10-12              # every cell -> clip.mp4 + poster.jpg (committed)
+python3 site.py 2026-10-12 "Judge: ..."       # rebuild index.html
 ```
 
-Finished cells are cached in `runs/<date>/<model>/<task>/` (`out.html`, `meta.json`, `auto.json`, `judge.json`; videos and raw replies are git-ignored), so adding a model only runs that model.
+Finished cells are cached in `runs/<date>/<model>/<task>/` (`out.html`, `meta.json`, `auto.json`, `judge.json`, `clip.mp4`, `poster.jpg`; full-size videos and raw replies are git-ignored), so adding a model only runs that model.
 
 ### Judge
 
-By default `judges/gemini.py` sends the video to Gemini (set `GEMINI_API_KEY`; a free key from Google AI Studio works, mind the daily quota). To use any other judge, set `BENCH_JUDGE_CMD` to a shell command that reads `$VIDEO` and `$PROMPT_FILE` and prints `SCORE: <n>` on its first line followed by a short justification.
+Two judges ship with the repo. `judges/gemini.py` sends the video to Gemini (set `GEMINI_API_KEY`; a free key from Google AI Studio works, mind the daily quota). `judges/codex.py` needs no API key (it uses the `codex` CLI on a ChatGPT subscription): it samples 16 frames and applies the same rubric. The 2026-10-13 run used it for every cell because the free Gemini quota was exhausted that night (`gemini-3.5-flash-lite` still answered, but it rated almost everything 8-10, which hides differences on hard tasks; its answers are kept as `judge_gemini.json` for cross-checking). The judge model is also a contestant (gpt-6-luna), but it ranked itself 5th. To use any other judge, set `BENCH_JUDGE_CMD` to a shell command that reads `$VIDEO` and `$PROMPT_FILE` and prints `SCORE: <n>` on its first line followed by a short justification.
 
 ## Add a model (one line)
 
