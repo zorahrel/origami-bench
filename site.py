@@ -127,7 +127,7 @@ footer{margin:16px 0 8px;font-size:13px;color:#666}
 <div id="cap"><b id="capt"></b><button id="mClip" class="on">Clip</button><button id="mLive">Live</button></div>
 <p id="why"></p>
 </section>
-<section id="rank"><h2>Ranking, mean of 4 tasks</h2><ol id="rl"></ol><p class="hint">Score 1-10 &middot; total generation time &middot; one run per cell, under ~1 point is a tie.</p><p class="hint">gpt-6.1-sol and gpt-6-astra: Codex judge <b>in arrivo</b> (scores are the mean of the other two judges). 4 of their 8 cells produced no page, scored 1.</p></section>
+<section id="rank"><h2>Ranking, mean of 4 tasks</h2><ol id="rl"></ol><p class="hint">Score 1-10 &middot; total generation time &middot; one run per cell, under ~1 point is a tie.</p></section>
 </main>
 <details id="how"><summary>How it works</summary>
 <p>Every model gets the same short prompt per task and must return one self-contained HTML file (three.js r170) under 12,000 output tokens. Each file is rendered headless in WebKit for 15 s; a panel of three vendor-diverse video judges (gpt-6-luna, Gemini via a free router, claude-haiku-5-5) scores 1-10 against a fixed rubric; capped at 4 if nothing moves. __JUDGENOTE__</p>

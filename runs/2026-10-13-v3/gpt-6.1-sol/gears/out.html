@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Æther · Clockwork Observatory</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080f16;color:#e8deca}canvas{display:block;width:100%;height:100%}.overlay{position:fixed;inset:0;pointer-events:none;font-family:Georgia,serif}.heading{position:absolute;top:30px;left:34px}.eyebrow,.spec,.caption,.status{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;text-transform:uppercase;letter-spacing:.18em;font-size:10px}.eyebrow{color:#b49b71}h1{font-size:39px;font-weight:400;letter-spacing:.04em;line-height:1;margin:12px 0 9px}.subtitle{font-size:13px;color:#9ba8ad;letter-spacing:.035em}.spec{margin-top:24px;color:#647982;line-height:2.1;font-size:9px}.footer{position:absolute;left:34px;right:34px;bottom:27px;display:flex;align-items:flex-end;justify-content:space-between}.caption{color:#8f9c9f;line-height:1.9;font-size:9px}.clock{text-align:right}.time{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:24px;font-weight:300;letter-spacing:.12em;font-variant-numeric:tabular-nums}.status{color:#a79373;margin-top:8px;font-size:9px}.beats{display:inline-flex;gap:5px;margin-left:10px;vertical-align:middle}.beats i{width:5px;height:5px;border:1px solid #826b47;border-radius:50%;display:block}.beats i.on{background:#d2ad6c;box-shadow:0 0 7px #e8b76a66}.live{display:inline-block;width:4px;height:4px;border-radius:50%;background:#88bfb4;margin-right:7px}
+@media(max-width:700px){.heading{top:20px;left:20px}h1{font-size:27px}.eyebrow{font-size:8px}.subtitle{font-size:11px}.spec{display:none}.footer{left:20px;right:20px;bottom:20px}.caption{font-size:7px;letter-spacing:.1em;max-width:145px}.time{font-size:18px}.status{font-size:7px}}
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div class="overlay">
+<div class="heading">
+<div class="eyebrow">Mechanical observatory · Nº 05</div>
+<h1>ÆTHER</h1>
+<div class="subtitle">A clockwork celestial automaton</div>
+<div class="spec">15 meshing gears / 12–36 teeth<br>Anchor escapement / 1 tick per second<br>Bell strike / every fifth tick<br>Planetary periods / 10 : 40 seconds</div>
+</div>
+<div class="footer">
+<div class="caption">Brass, blued steel &amp; ivory<br>One master angle. A world in motion.</div>
+<div class="clock">
+<div class="time" id="time">00:00:00</div>
+<div class="status"><span class="live" id="live"></span>Local time <span class="beats" id="beats"><i></i><i></i><i></i><i></i><i></i></span></div>
+</div>
+</div>
+</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const TAU=Math.PI*2;
+const mod=(x,m)=>((x%m)+m)%m;
+const smooth=(a,b,x)=>{const q=THREE.MathUtils.clamp((x-a)/(b-a),0,1);return q*q*(3-2*q)};
+const renderer=new THREE.WebGLRenderer({canvas:document.getElementById('scene'),antialias:true,alpha:false});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
+renderer.setClearColor(0x080f16);
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.15;
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+const scene=new THREE.Scene();
+scene.fog=new THREE.FogExp2(0x080f16,.025);
+const camera=new THREE.PerspectiveCamera(35,1,.1,100);
+let fit=20;
+
+// Ambiente sintetico: pannelli luminosi dipinti, nessun asset esterno.
+const envCanvas=document.createElement('canvas');
+envCanvas.width=1024;envCanvas.height=512;
+const ec=envCanvas.getContext('2d');
+const eg=ec.createLinearGradient(0,0,0,512);
+eg.addColorStop(0,'#718d9c');eg.addColorStop(.36,'#283744');eg.addColorStop(.66,'#101820');eg.addColorStop(1,'#080d12');
+ec.fillStyle=eg;ec.fillRect(0,0,1024,512);
+for(const [x,w,color] of [[70,105,'#fff1c9'],[430,54,'#bce4ff'],[710,145,'#b38952']]){
+ const g=ec.createLinearGradient(x,0,x+w,0);
+ g.addColorStop(0,'rgba(255,255,255,0)');g.addColorStop(.2,color);g.addColorStop(.8,color);g.addColorStop(1,'rgba(255,255,255,0)');
+ ec.fillStyle=g;ec.fillRect(x,70,w,265);
+}
+const envTex=new THREE.CanvasTexture(envCanvas);
+envTex.mapping=THREE.EquirectangularReflectionMapping;
+envTex.colorSpace=THREE.SRGBColorSpace;
+const pmrem=new THREE.PMREMGenerator(renderer);
+const environment=pmrem.fromEquirectangular(envTex);
+scene.environment=environment.texture;
+scene.environmentIntensity=.8;
+envTex.dispose();pmrem.dispose();
+
+scene.add(new THREE.HemisphereLight(0xc0dbef,0x403021,2));
+const key=new THREE.DirectionalLight(0xffe4b1,3.2);
+key.position.set(-5,8,12);key.castShadow=true;
+key.shadow.mapSize.set(2048,2048);
+Object.assign(key.shadow.camera,{left:-8,right:8,top:7,bottom:-7,near:.5,far:35});
+key.shadow.bias=-.0004;key.shadow.normalBias=.025;
+scene.add(key);
+const fill=new THREE.DirectionalLight(0x84badb,1.7);fill.position.set(6,1,7);scene.add(fill);
+const rim=new THREE.PointLight(0xf4b56c,45,25,2);rim.position.set(-6,5,3);scene.add(rim);
+const cold=new THREE.PointLight(0x689ac9,35,23,2);cold.position.set(5,-2,5);scene.add(cold);
+
+const material=(color,metalness=.8,roughness=.3)=>new THREE.MeshStandardMaterial({color,metalness,roughness});
+const brass=material(0xc4a05c,.88,.27);
+const paleBrass=material(0xe2c482,.83,.24);
+const copper=material(0xa96c43,.88,.32);
+const darkBrass=material(0x655032,.8,.38);
+const steel=material(0x496477,.9,.25);
+const darkSteel=material(0x182a36,.84,.34);
+const black=material(0x10191d,.5,.48);
+const plateMat=material(0x172731,.65,.42);
+const ivory=material(0xe9dfc5,.08,.42);
+const red=material(0xb94431,.6,.27);
+const turquoise=material(0x368e9c,.55,.23);
+
+function mesh(geometry,mat,parent=scene){
+ const m=new THREE.Mesh(geometry,mat);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;
+}
+function box(w,h,d,mat,parent,x=0,y=0,z=0){
+ const m=mesh(new THREE.BoxGeometry(w,h,d),mat,parent);m.position.set(x,y,z);return m;
+}
+function sphere(r,mat,parent,x=0,y=0,z=0){
+ const m=mesh(new THREE.SphereGeometry(r,24,16),mat,parent);m.position.set(x,y,z);return m;
+}
+function disk(r,d,mat,parent,x=0,y=0,z=0){
+ const m=mesh(new THREE.CylinderGeometry(r,r,d,48),mat,parent);
+ m.rotation.x=Math.PI/2;m.position.set(x,y,z);return m;
+}
+function torus(r,t,mat,parent,x=0,y=0,z=0){
+ const m=mesh(new THREE.TorusGeometry(r,t,8,96),mat,parent);m.position.set(x,y,z);return m;
+}
+const up=new THREE.Vector3(0,1,0),direction=new THREE.Vector3();
+function connect(m,ax,ay,az,bx,by,bz){
+ const dx=bx-ax,dy=by-ay,dz=bz-az,len=Math.hypot(dx,dy,dz);
+ m.position.set((ax+bx)/2,(ay+by)/2,(az+bz)/2);
+ direction.set(dx/len,dy/len,dz/len);
+ m.quaternion.setFromUnitVectors(up,direction);m.scale.y=len;
+}
+function rod(parent,r,mat,a,b){
+ const m=mesh(new THREE.CylinderGeometry(r,r,1,10),mat,parent);
+ if(a&&b)connect(m,...a,...b);return m;
+}
+function roundRect(w,h,r){
+ const s=new THREE.Shape(),x=-w/2,y=-h/2;
+ s.moveTo(x+r,y);s.lineTo(x+w-r,y);s.quadraticCurveTo(x+w,y,x+w,y+r);
+ s.lineTo(x+w,y+h-r);s.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+ s.lineTo(x+r,y+h);s.quadraticCurveTo(x,y+h,x,y+h-r);
+ s.lineTo(x,y+r);s.quadraticCurveTo(x,y,x+r,y);return s;
+}
+const chassis=new THREE.Group();scene.add(chassis);
+const bed=mesh(new THREE.ExtrudeGeometry(roundRect(13.4,9.8,.5),{
+ depth:.28,bevelEnabled:true,bevelSegments:3,bevelSize:.10,bevelThickness:.08,curveSegments:12
+}),plateMat,chassis);
+bed.position.z=-.98;
+box(14,.30,2.5,darkSteel,chassis,0,-5.04,-.1);
+box(13.7,.06,2.6,brass,chassis,0,-4.86,-.1);
+for(const x of [-6.13,6.13]){
+ for(const y of [-4.4,4.4]){
+  disk(.17,1.9,brass,chassis,x,y,-.03);
+  disk(.24,.08,copper,chassis,x,y,.93);
+  disk(.17,.06,darkSteel,chassis,x,y,.99);
+  box(.18,.025,.015,paleBrass,chassis,x,y,1.027);
+ }
+ rod(chassis,.075,brass,[x,-4.4,.74],[x,4.4,.74]);
+}
+for(const y of [-4.4,4.4])rod(chassis,.065,brass,[-6.13,y,.74],[6.13,y,.74]);
+for(const x of [-2.6,2.6]){
+ disk(.13,1.3,steel,chassis,x,1.3,-.03);
+ disk(.20,.06,brass,chassis,x,1.3,.63);
+}
+const ground=mesh(new THREE.PlaneGeometry(80,80),material(0x0d1820,.3,.55));
+ground.rotation.x=-Math.PI/2;ground.position.y=-5.25;ground.castShadow=false;
+
+// Modulo comune, profili a evolvente e centri distanti esattamente r1+r2.
+const module=.075,counts=[36,20,12,28,16,24,12,32,16,24,12,28,16,20,32];
+const gearData=[];
+const geometries=new Map();
+function gearGeometry(n){
+ if(geometries.has(n))return geometries.get(n);
+ const R=n*module/2,root=R-1.25*module,base=R*Math.cos(Math.PI/9),tip=R+module;
+ const pitch=TAU/n,half=Math.PI/(2*n)-.02/n;
+ const invPitch=Math.tan(Math.PI/9)-Math.PI/9;
+ const inv=r=>{const a=Math.acos(THREE.MathUtils.clamp(base/r,-1,1));return Math.tan(a)-a};
+ const start=Math.max(root,base);
+ const halfAt=r=>half+invPitch-inv(r);
+ const s=new THREE.Shape();
+ const point=(r,a,first=false)=>{const x=r*Math.cos(a),y=r*Math.sin(a);first?s.moveTo(x,y):s.lineTo(x,y)};
+ for(let k=0;k<n;k++){
+  const a=k*pitch,hs=halfAt(start),ht=halfAt(tip);
+  point(root,a-hs,k===0);
+  if(root<base)point(base,a-hs);
+  for(let j=0;j<=6;j++){const r=start+(tip-start)*j/6;point(r,a-halfAt(r))}
+  for(let j=1;j<=4;j++)point(tip,a-ht+2*ht*j/4);
+  for(let j=6;j>=0;j--){const r=start+(tip-start)*j/6;point(r,a+halfAt(r))}
+  point(root,a+hs);
+  const next=(k+1)*pitch-hs;
+  for(let j=1;j<=4;j++)point(root,a+hs+(next-a-hs)*j/4);
+ }
+ s.closePath();
+ const hole=new THREE.Path();hole.absarc(0,0,R*.57,0,TAU,true);s.holes.push(hole);
+ const g=new THREE.ExtrudeGeometry(s,{depth:.18,bevelEnabled:true,bevelSegments:1,bevelSize:.009,bevelThickness:.009,curveSegments:32});
+ g.translate(0,0,-.09);geometries.set(n,g);return g;
+}
+function numberStamp(n){
+ const c=document.createElement('canvas');c.width=128;c.height=64;
+ const ctx=c.getContext('2d');ctx.fillStyle='#e8d7a5';ctx.font='bold 34px Georgia';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(n+'T',64,34);
+ const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;
+ return new THREE.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false});
+}
+for(let i=0;i<counts.length;i++){
+ const n=counts[i],R=n*module/2;
+ let x=-4.8,y=3.2,phase=0;
+ if(i){
+  const previous=gearData[i-1],angle=i<=4?-Math.PI/2:i<=10?0:Math.PI/2;
+  const distance=previous.R+R;
+  x=previous.x+Math.cos(angle)*distance;y=previous.y+Math.sin(angle)*distance;
+  // Condizione di fase: un dente incontra il vano dell'altra ruota.
+  phase=((previous.n+n)*angle+n*Math.PI-Math.PI-previous.n*previous.phase)/n;
+ }
+ const g=new THREE.Group();g.position.set(x,y,0);scene.add(g);
+ const face=i%4===2?copper:i%4===0?paleBrass:brass;
+ mesh(gearGeometry(n),[face,darkBrass],g);
+ const hub=R*.18+.04,inner=R*.57,spokes=n>=28?6:n>=20?5:4;
+ for(let k=0;k<spokes;k++){
+  const a=k*TAU/spokes,len=inner-hub+.07;
+  const spoke=box(len,.07+R*.025,.16,face,g,(hub+len/2-.02)*Math.cos(a),(hub+len/2-.02)*Math.sin(a),0);
+  spoke.rotation.z=a;
+ }
+ disk(hub,.25,face,g);
+ disk(hub*.55,.28,darkSteel,g);
+ torus(inner,.013,copper,g,0,0,.104);
+ box(hub*.6,.023,.014,steel,g,0,0,.148);
+ const stamp=mesh(new THREE.PlaneGeometry(Math.min(.42,R*.65),.15),numberStamp(n),g);
+ stamp.position.set(0,R*.34,.114);stamp.castShadow=false;
+ disk(.075,.80,steel,scene,x,y,-.24);
+ torus(R+.12,.013,darkBrass,chassis,x,y,-.56);
+ gearData.push({group:g,x,y,n,R,phase,sign:(i-3)%2===0?1:-1});
+}
+
+// Ruota di scappamento calettata sull'albero della quarta ruota.
+const escape=new THREE.Group();escape.position.set(-4.8,-1.6,.43);scene.add(escape);
+const es=new THREE.Shape(),escapeR=1.07,escapeN=28;
+for(let k=0;k<escapeN;k++){
+ for(const [f,r] of [[0,.90],[.16,1.05],[.30,1.05],[.91,.90]]){
+  const a=(k+f)*TAU/escapeN,x=escapeR*r*Math.cos(a),y=escapeR*r*Math.sin(a);
+  k===0&&f===0?es.moveTo(x,y):es.lineTo(x,y);
+ }
+}
+es.closePath();const eh=new THREE.Path();eh.absarc(0,0,.68,0,TAU,true);es.holes.push(eh);
+mesh(new THREE.ExtrudeGeometry(es,{depth:.10,bevelEnabled:true,bevelSize:.006,bevelThickness:.006,bevelSegments:1,curveSegments:40}),steel,escape);
+for(let i=0;i<5;i++){const a=i*TAU/5;const m=box(.57,.07,.09,steel,escape,.41*Math.cos(a),.41*Math.sin(a),.04);m.rotation.z=a}
+disk(.17,.19,paleBrass,escape,0,0,.05);
+const anchor=new THREE.Group();anchor.position.set(-4.8,-.20,.81);scene.add(anchor);
+rod(anchor,.067,brass,[0,0,0],[-.86,-.67,0]);
+rod(anchor,.067,brass,[0,0,0],[.86,-.67,0]);
+for(const x of [-.86,.86]){
+ const pallet=box(.20,.17,.15,darkSteel,anchor,x,-.67,.03);
+ pallet.rotation.z=x<0?-.52:.52;
+ box(.12,.045,.17,paleBrass,anchor,x,-.74,.035);
+}
+disk(.16,.17,copper,anchor);
+const pendulum=new THREE.Group();pendulum.position.set(-4.8,-.20,1.07);scene.add(pendulum);
+rod(pendulum,.036,paleBrass,[0,.22,0],[0,-3.72,0]);
+box(.13,.35,.09,darkSteel,pendulum,0,-2.9,0);
+disk(.36,.16,brass,pendulum,0,-3.70,.01);
+disk(.29,.025,paleBrass,pendulum,0,-3.70,.11);
+torus(.31,.018,copper,pendulum,0,-3.70,.135);
+disk(.055,.035,darkSteel,pendulum,0,-3.70,.145);
+const tickGlowMat=new THREE.MeshBasicMaterial({color:0xffce79,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending});
+torus(.36,.019,tickGlowMat,pendulum,0,-3.70,.14);
+disk(.13,.13,steel,pendulum,0,0,.08);
+
+// Quadrante e lancette.
+const dial=new THREE.Group();dial.position.set(0,1.35,1.29);scene.add(dial);
+disk(2.17,.18,darkSteel,dial);
+disk(2.06,.16,ivory,dial,0,0,.05);
+torus(2.14,.07,brass,dial,0,0,.11);
+torus(2.25,.02,copper,dial,0,0,.02);
+const dc=document.createElement('canvas');dc.width=dc.height=1024;
+const dctx=dc.getContext('2d'),C=512;
+const dg=dctx.createRadialGradient(C,C,10,C,C,512);
+dg.addColorStop(0,'#f5efdd');dg.addColorStop(1,'#d9cba9');
+dctx.fillStyle=dg;dctx.fillRect(0,0,1024,1024);
+dctx.strokeStyle='#586369';
+for(const radius of [492,467,344]){
+ dctx.lineWidth=radius===344?1.2:2;dctx.beginPath();dctx.arc(C,C,radius,0,TAU);dctx.stroke();
+}
+for(let i=0;i<60;i++){
+ const a=i*TAU/60-Math.PI/2,outer=460,inner=i%5===0?423:446;
+ dctx.strokeStyle=i%5===0?'#243239':'#71796f';dctx.lineWidth=i%5===0?5:2;
+ dctx.beginPath();dctx.moveTo(C+Math.cos(a)*inner,C+Math.sin(a)*inner);dctx.lineTo(C+Math.cos(a)*outer,C+Math.sin(a)*outer);dctx.stroke();
+}
+const romans=['XII','I','II','III','IV','V','VI','VII','VIII','IX','X','XI'];
+dctx.textAlign='center';dctx.textBaseline='middle';dctx.fillStyle='#24323a';dctx.font='43px Georgia';
+for(let i=0;i<12;i++){const a=i*TAU/12;dctx.fillText(romans[i],C+Math.sin(a)*389,C-Math.cos(a)*389)}
+dctx.font='22px Georgia';dctx.fillStyle='#6f6551';dctx.fillText('Æ T H E R',C,C-130);
+dctx.font='15px monospace';dctx.fillText('ASTRAL REGULATOR',C,C+145);
+dctx.font='13px monospace';dctx.fillText('AUTOMATON  ·  Nº 05',C,C+180);
+const dialTexture=new THREE.CanvasTexture(dc);dialTexture.colorSpace=THREE.SRGBColorSpace;dialTexture.anisotropy=renderer.capabilities.getMaxAnisotropy();
+const face=mesh(new THREE.CircleGeometry(2.055,128),new THREE.MeshStandardMaterial({map:dialTexture,metalness:.04,roughness:.43}),dial);
+face.position.z=.134;face.castShadow=false;
+function hand(length,width,tail,mat,z){
+ const s=new THREE.Shape();
+ s.moveTo(0,-tail);s.lineTo(-width*.55,.06);s.lineTo(-width*.32,length*.75);s.lineTo(0,length);s.lineTo(width*.32,length*.75);s.lineTo(width*.55,.06);s.closePath();
+ const g=new THREE.Group();g.position.z=z;dial.add(g);
+ mesh(new THREE.ExtrudeGeometry(s,{depth:.025,bevelEnabled:true,bevelSize:.006,bevelThickness:.005,bevelSegments:1}),mat,g);return g;
+}
+const hourHand=hand(1.20,.21,.24,darkSteel,.17);
+const minuteHand=hand(1.68,.12,.29,steel,.235);
+const secondHand=hand(1.94,.034,.44,red,.305);
+torus(.105,.017,red,secondHand,0,-.32,.025);
+disk(.16,.09,brass,dial,0,0,.37);
+disk(.07,.015,darkSteel,dial,0,0,.426);
+box(.09,.016,.013,paleBrass,dial,0,0,.44);
+
+// Orrery: piano inclinato, due alberi concentrici, periodi 40 s e 10 s.
+rod(scene,.06,brass,[0,3.43,.43],[0,4.03,.78]);
+const orrery=new THREE.Group();orrery.position.set(0,4.04,.82);orrery.rotation.x=.55;scene.add(orrery);
+for(const radius of [.83,1.65]){
+ const ring=torus(radius,.014,darkBrass,orrery);ring.rotation.x=Math.PI/2;
+}
+const orbits=[];
+for(const [radius,y,mat,size] of [[1.65,.06,turquoise,.19],[.83,.24,red,.14]]){
+ const orbit=new THREE.Group();orbit.position.y=y;orrery.add(orbit);
+ box(radius,.036,.055,brass,orbit,radius/2,0,0);
+ rod(orbit,.025,brass,[radius,0,0],[radius,.22,0]);
+ const planet=sphere(size,mat,orbit,radius,.23,0);
+ const band=torus(size*1.01,.009,paleBrass,planet);band.rotation.x=Math.PI/2;
+ orbits.push(orbit);
+}
+const sun=sphere(.245,paleBrass,orrery,0,.32,0);
+const stem=mesh(new THREE.CylinderGeometry(.10,.15,.42,24),brass,orrery);stem.position.y=.05;
+for(let i=0;i<8;i++){
+ const a=i*TAU/8;
+ rod(orrery,.011,paleBrass,[.27*Math.cos(a),.32,.27*Math.sin(a)],[.35*Math.cos(a),.32,.35*Math.sin(a)]);
+}
+
+// Cinghie aperte: tangenti esatte, stesso verso, rapporto dei raggi.
+function belt(a,b,ra,rb,z){
+ const dx=b[0]-a[0],dy=b[1]-a[1],d=Math.hypot(dx,dy);
+ const alpha=Math.atan2(dy,dx),beta=Math.acos((ra-rb)/d);
+ for(const angle of [alpha+beta,alpha-beta]){
+  const nx=Math.cos(angle),ny=Math.sin(angle);
+  rod(scene,.018,black,[a[0]+ra*nx,a[1]+ra*ny,z],[b[0]+rb*nx,b[1]+rb*ny,z]);
+ }
+ const p1=new THREE.Group(),p2=new THREE.Group();p1.position.set(...a,z);p2.position.set(...b,z);scene.add(p1,p2);
+ for(const [p,r] of [[p1,ra],[p2,rb]]){
+  disk(r,.06,darkSteel,p);torus(r,.023,black,p,0,0,.015);
+  for(let i=0;i<3;i++){const bar=box(r*1.55,.028,.024,brass,p,0,0,.046);bar.rotation.z=i*TAU/3}
+ }
+ return [p1,p2];
+}
+const hammerCenter=[3,.15],hammerR0=.45,hammerR1=.80,rollerRadius=.085;
+const hammerPulleys=belt([gearData[12].x,gearData[12].y],hammerCenter,.4,.125,.72);
+disk(.07,1.4,steel,scene,...hammerCenter,.18);
+function camLift(p){
+ if(p<.10||p>=.97)return 0;
+ if(p<.77)return smooth(.10,.77,p);
+ if(p<.88)return 1;
+ return 1-smooth(.88,.97,p);
+}
+const camShape=new THREE.Shape(),camPoints=[];
+for(let i=0;i<=480;i++){
+ const p=i/480,a=p*TAU,r=hammerR0+(hammerR1-hammerR0)*camLift(p);
+ const x=r*Math.cos(a),y=r*Math.sin(a);
+ i?camShape.lineTo(x,y):camShape.moveTo(x,y);camPoints.push([x,y]);
+}
+camShape.closePath();
+const hammerCam=new THREE.Group();hammerCam.position.set(...hammerCenter,1.03);scene.add(hammerCam);
+mesh(new THREE.ExtrudeGeometry(camShape,{depth:.12,bevelEnabled:true,bevelSegments:1,bevelSize:.007,bevelThickness:.007}),copper,hammerCam);
+disk(.15,.16,darkSteel,hammerCam,0,0,.055);
+rod(hammerCam,.021,paleBrass,[0,0,.14],[.34,0,.14]);
+const hammerRoller=disk(rollerRadius,.09,steel,scene,3,.7,1.22);
+const followerStem=rod(scene,.036,paleBrass);
+for(const x of [2.86,3.14])rod(scene,.025,darkSteel,[x,.63,1.15],[x,1.64,1.15]);
+box(.39,.07,.18,brass,scene,3,1.45,1.11);
+const hammerPivot=[3,2.60,1.28];
+disk(.17,.19,darkSteel,scene,...hammerPivot);
+disk(.08,.22,brass,scene,...hammerPivot);
+const hammer=new THREE.Group();hammer.position.set(...hammerPivot);scene.add(hammer);
+rod(hammer,.042,brass,[0,0,0],[1.45,0,0]);
+const hammerHead=mesh(new THREE.CylinderGeometry(.15,.15,.32,24),darkSteel,hammer);
+hammerHead.position.x=1.45;
+torus(.12,.018,brass,hammer,1.45,0,.17);
+const hammerLink=rod(scene,.028,steel);
+sphere(.065,paleBrass,hammer,.32,0,.03);
+
+// Campana cava e battaglio, sospesi alla traversa.
+rod(scene,.05,brass,[4.90,4.40,.77],[4.90,4.36,1.29]);
+const bell=new THREE.Group();bell.position.set(4.90,4.36,1.29);scene.add(bell);
+const bellProfile=[
+ [.73,0],[.72,.07],[.62,.19],[.51,.40],[.39,.65],[.23,.89],[.16,.98],[0,1.02],
+ [0,.94],[.13,.90],[.19,.82],[.34,.59],[.46,.35],[.57,.15],[.67,.065],[.73,0]
+].map(p=>new THREE.Vector2(...p));
+const bellBody=mesh(new THREE.LatheGeometry(bellProfile,64),paleBrass,bell);
+bellBody.position.y=-1.15;
+const lip=torus(.72,.035,copper,bell,0,-1.12,0);lip.rotation.x=Math.PI/2;
+const clapper=new THREE.Group();clapper.position.y=-.18;bell.add(clapper);
+rod(clapper,.019,darkSteel,[0,0,0],[0,-.90,0]);
+sphere(.09,copper,clapper,0,-.90,0);
+disk(.08,.15,steel,bell);
+const flashMat=new THREE.MeshBasicMaterial({color:0xffc878,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending});
+const flashMat2=flashMat.clone();
+const flash1=torus(.89,.019,flashMat,scene,4.90,3.76,1.37);
+const flash2=torus(.97,.010,flashMat2,scene,4.90,3.76,1.39);
+flash1.castShadow=flash2.castShadow=false;
+const bellLight=new THREE.PointLight(0xffb652,0,4,2);bellLight.position.set(4.8,3.65,2);scene.add(bellLight);
+
+// Seconda camma: eccentrici opposti, rulli guidati e bielle a lunghezza fissa.
+const walkX=.35,walkY=-1.60,hipX=1.80,hipY=-2.14;
+const walkRadius=.38,eccentricity=.12,walkRollerR=.09,rockerArm=.38,linkLength=1.15;
+const walkPulleys=belt([gearData[7].x,gearData[7].y],[walkX,walkY],.4,.05,1.42);
+disk(.06,1.4,steel,scene,walkX,walkY,1.04);
+const walker=new THREE.Group();walker.position.set(hipX,hipY,1.82);scene.add(walker);
+const body=new THREE.Group();walker.add(body);
+const torso=sphere(.27,darkSteel,body,0,.40,0);torso.scale.set(1,.95,.68);
+box(.31,.07,.32,brass,body,0,.13,0);
+box(.24,.31,.025,brass,body,0,.42,.18);
+for(const y of [.32,.43,.54])sphere(.023,copper,body,0,y,.209);
+rod(body,.05,brass,[0,.63,0],[0,.77,0]);
+sphere(.18,paleBrass,body,0,.91,0);
+sphere(.036,copper,body,0,.91,.17);
+for(const x of [-.062,.062])sphere(.016,black,body,x,.955,.155);
+const hat=mesh(new THREE.SphereGeometry(.205,24,12,0,TAU,0,Math.PI/2),darkSteel,body);
+hat.position.set(0,1.025,0);
+const brim=mesh(new THREE.CylinderGeometry(.26,.26,.025,32),darkSteel,body);brim.position.y=1.028;
+const arms=[];
+for(const x of [-.29,.29]){
+ const a=new THREE.Group();a.position.set(x,.57,.015);body.add(a);
+ sphere(.066,brass,a);
+ rod(a,.047,darkSteel,[0,0,0],[0,-.34,0]);
+ sphere(.061,copper,a,0,-.34,0);
+ rod(a,.037,brass,[0,-.34,0],[.075,-.59,.03]);
+ sphere(.068,paleBrass,a,.075,-.59,.03);arms.push(a);
+}
+const walkingParts=[];
+for(let j=0;j<2;j++){
+ const z=j===0?1.66:1.96,trackY=walkY+(j===0?-.12:.12);
+ const cam=new THREE.Group();cam.position.set(walkX,walkY,z-.075);scene.add(cam);
+ disk(walkRadius,.075,j===0?steel:copper,cam,eccentricity,0,0);
+ torus(walkRadius,.015,paleBrass,cam,eccentricity,0,.045);
+ rod(cam,.025,brass,[0,0,.055],[eccentricity,0,.055]);
+ disk(.06,.12,paleBrass,cam);
+ const roller=disk(walkRollerR,.075,steel,scene,.8,trackY,z+.01);
+ disk(.035,.09,brass,roller);
+ for(const y of [trackY-.105,trackY+.105]){
+  rod(scene,.016,darkSteel,[.56,y,z-.065],[1.10,y,z-.065]);
+ }
+ const linkage=rod(scene,.026,paleBrass),rocker=rod(scene,.032,copper);
+ const pin=sphere(.059,paleBrass,scene);
+ disk(.085,.12,brass,scene,hipX,hipY,z);
+ const leg=new THREE.Group();leg.position.set(hipX,hipY,z);scene.add(leg);
+ rod(leg,.062,darkSteel,[0,0,0],[0,-.57,0]);
+ sphere(.085,copper,leg,0,-.57,0);
+ const knee=new THREE.Group();knee.position.y=-.57;leg.add(knee);
+ rod(knee,.049,brass,[0,0,0],[0,-.55,0]);
+ sphere(.064,steel,knee,0,-.55,0);
+ box(.30,.075,.18,black,knee,.07,-.585,.018);
+ walkingParts.push({cam,roller,linkage,rocker,pin,leg,knee,z,trackY,neutral:j===0?4.33:3.85});
+}
+const treadmill=box(2.85,.11,.61,darkSteel,scene,1.85,-3.37,1.79);
+box(2.92,.035,.68,brass,scene,1.85,-3.435,1.79);
+for(const x of [.45,3.25])disk(.10,.64,brass,scene,x,-3.36,1.78);
+const treads=[];
+for(let i=0;i<19;i++)treads.push(box(.017,.015,.50,steel,scene,.45+i*.15,-3.306,1.80));
+
+// Pulviscolo: semi statici, traiettorie dipendenti solo dall'angolo maestro.
+let seed=1497;
+const random=()=>{seed=(seed*1664525+0x3C6EF35F)>>>0;return seed/4294967296};
+const dustCount=150,dustPositions=new Float32Array(dustCount*3),dustSeeds=[];
+for(let i=0;i<dustCount;i++)dustSeeds.push([random()*18-9,random()*13-6.5,1+random()*6,random()*TAU,.022+random()*.045]);
+const particleCanvas=document.createElement('canvas');particleCanvas.width=particleCanvas.height=32;
+const pc=particleCanvas.getContext('2d'),pg=pc.createRadialGradient(16,16,0,16,16,16);
+pg.addColorStop(0,'rgba(255,238,200,1)');pg.addColorStop(.25,'rgba(255,238,200,.6)');pg.addColorStop(1,'rgba(255,238,200,0)');
+pc.fillStyle=pg;pc.fillRect(0,0,32,32);
+const dustGeometry=new THREE.BufferGeometry();dustGeometry.setAttribute('position',new THREE.BufferAttribute(dustPositions,3));
+const dust=new THREE.Points(dustGeometry,new THREE.PointsMaterial({color:0xe5d4b4,size:.045,map:new THREE.CanvasTexture(particleCanvas),transparent:true,opacity:.44,depthWrite:false,blending:THREE.AdditiveBlending}));
+scene.add(dust);
+
+function resize(){
+ const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();
+ const tangent=Math.tan(THREE.MathUtils.degToRad(camera.fov/2));
+ fit=Math.max(5.8/tangent,7.25/(tangent*camera.aspect));
+}
+addEventListener('resize',resize);resize();
+const date=new Date();
+const initialSeconds=date.getHours()*3600+date.getMinutes()*60+date.getSeconds()+date.getMilliseconds()/1000;
+const initialPerformance=performance.now();
+const timeElement=document.getElementById('time'),live=document.getElementById('live'),beatDots=[...document.querySelectorAll('#beats i')];
+let lastSecond=-1;
+
+function animate(now){
+ // Unico ingresso temporale. Ogni movimento è una funzione di theta.
+ const theta=TAU*(initialSeconds+(now-initialPerformance)/1000);
+ const t=theta/TAU,whole=Math.floor(t),fraction=t-whole;
+ // Avanzamento di un dente: breve rilascio, arresto al battito successivo.
+ const drive=whole+smooth(.84,1,fraction);
+ for(const g of gearData)g.group.rotation.z=g.phase+g.sign*TAU*drive/g.n;
+ escape.rotation.z=TAU*drive/28+.11;
+ pendulum.rotation.z=.13*Math.cos(theta/2);
+ anchor.rotation.z=.105*Math.cos(theta/2);
+ tickGlowMat.opacity=.7*Math.exp(-fraction*12);
+
+ hourHand.rotation.z=-TAU*drive/43200;
+ minuteHand.rotation.z=-TAU*drive/3600;
+ secondHand.rotation.z=-TAU*drive/60;
+ orbits[0].rotation.y=TAU*drive/40;
+ orbits[1].rotation.y=TAU*drive/10+1.4;
+
+ const camPhase=mod(drive,5)/5,camAngle=Math.PI/2-TAU*camPhase;
+ hammerCam.rotation.z=camAngle;
+ hammerPulleys[0].rotation.z=gearData[12].group.rotation.z;
+ hammerPulleys[1].rotation.z=camAngle;
+
+ // Inviluppo del profilo: il rullo segue il contatto, non una curva inventata.
+ const cs=Math.cos(camAngle),sn=Math.sin(camAngle);
+ let rollerHeight=hammerR0+rollerRadius;
+ for(const p of camPoints){
+  const x=p[0]*cs-p[1]*sn;
+  if(Math.abs(x)<=rollerRadius){
+   const y=p[0]*sn+p[1]*cs+Math.sqrt(Math.max(0,rollerRadius*rollerRadius-x*x));
+   rollerHeight=Math.max(rollerHeight,y);
+  }
+ }
+ const followerY=hammerCenter[1]+rollerHeight;
+ const lift=THREE.MathUtils.clamp((rollerHeight-hammerR0-rollerRadius)/(hammerR1-hammerR0),0,1);
+ hammerRoller.position.y=followerY;
+ connect(followerStem,3,followerY,1.19,3,followerY+.39,1.19);
+ const hammerAngle=.435+.51*lift;
+ hammer.rotation.z=hammerAngle;
+ const pinX=3+.32*Math.cos(hammerAngle),pinY=2.60+.32*Math.sin(hammerAngle);
+ connect(hammerLink,3,followerY+.39,1.25,pinX,pinY,1.28);
+
+ const strikeAge=mod(t,5),strikeEnergy=Math.exp(-strikeAge*6.5);
+ const shake=.063*strikeEnergy*Math.sin(strikeAge*58);
+ bell.rotation.z=shake;clapper.rotation.z=-shake*1.8;
+ flash1.visible=flash2.visible=strikeAge<.9;
+ flash1.scale.setScalar(1+strikeAge*.75);flash2.scale.setScalar(1+strikeAge*1.18);
+ flashMat.opacity=strikeEnergy*.72;flashMat2.opacity=strikeEnergy*.39;
+ bellLight.intensity=strikeEnergy*5;
+
+ const walkAngle=TAU*drive/4;
+ walkPulleys[0].rotation.z=gearData[7].group.rotation.z;
+ walkPulleys[1].rotation.z=walkAngle;
+ for(let j=0;j<walkingParts.length;j++){
+  const p=walkingParts[j],a=walkAngle+j*Math.PI;
+  p.cam.rotation.z=a;
+  const centerX=walkX+eccentricity*Math.cos(a),centerY=walkY+eccentricity*Math.sin(a);
+  const dy=p.trackY-centerY,R=walkRadius+walkRollerR;
+  const sliderX=centerX+Math.sqrt(R*R-dy*dy);
+  p.roller.position.x=sliderX;
+  // Intersezione di due cerchi: biella costante, bilanciere e gamba solidali.
+  const vx=sliderX-hipX,vy=p.trackY-hipY,d=Math.hypot(vx,vy);
+  const cosine=(rockerArm*rockerArm+d*d-linkLength*linkLength)/(2*rockerArm*d);
+  const angle=Math.atan2(vy,vx)+Math.acos(THREE.MathUtils.clamp(cosine,-1,1));
+  const px=hipX+rockerArm*Math.cos(angle),py=hipY+rockerArm*Math.sin(angle);
+  connect(p.linkage,sliderX,p.trackY,p.z,px,py,p.z);
+  connect(p.rocker,hipX,hipY,p.z,px,py,p.z);
+  p.pin.position.set(px,py,p.z+.025);
+  p.leg.rotation.z=angle-p.neutral;
+  p.knee.rotation.z=-.10-.48*Math.max(0,Math.cos(a));
+  arms[j].rotation.z=-(angle-p.neutral)*1.6;
+ }
+ body.position.y=.014*Math.cos(walkAngle*2);
+ for(let i=0;i<treads.length;i++)treads[i].position.x=.43+mod(i*.15-drive*.14,2.85);
+
+ for(let i=0;i<dustCount;i++){
+  const s=dustSeeds[i];
+  dustPositions[i*3]=s[0]+.16*Math.sin(t*.21+s[3]);
+  dustPositions[i*3+1]=mod(s[1]+t*s[4]+6.5,13)-6.5;
+  dustPositions[i*3+2]=s[2]+.15*Math.cos(t*.14+s[3]);
+ }
+ dustGeometry.attributes.position.needsUpdate=true;
+ const elapsed=t-initialSeconds;
+ camera.position.set(1.35+.38*Math.sin(t*.064),.80+.24*Math.sin(t*.049),fit*(1.02+.075*Math.exp(-elapsed/55)));
+ camera.lookAt(0,-.02,.25);
+
+ live.style.opacity=String(.35+.65*Math.exp(-fraction*6));
+ if(whole!==lastSecond){
+  const seconds=mod(whole,86400),h=Math.floor(seconds/3600),m=Math.floor(seconds/60)%60,s=seconds%60;
+  timeElement.textContent=[h,m,s].map(v=>String(v).padStart(2,'0')).join(':');
+  const beat=mod(whole,5);
+  beatDots.forEach((dot,i)=>dot.classList.toggle('on',i<=beat));
+  lastSecond=whole;
+ }
+ renderer.render(scene,camera);
+ requestAnimationFrame(animate);
+}
+animate(performance.now());
+</script>
+</body>
+</html>

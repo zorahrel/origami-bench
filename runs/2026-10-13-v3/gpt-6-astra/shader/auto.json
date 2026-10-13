@@ -1,1 +1,1 @@
-{"not_blank": false, "animated": false, "n_errors": 0, "console_errors": ["no HTML produced"], "diffs": []}
+{"console_errors": [], "n_errors": 0, "std": 35.19, "diffs": [33.55, 25.13, 14.56, 16.37], "not_blank": true, "animated": true}

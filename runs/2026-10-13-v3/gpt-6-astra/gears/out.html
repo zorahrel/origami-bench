@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Horologium — The Living Machine</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080d12;color:#e8dfca}
+body{font-family:Arial,Helvetica,sans-serif}
+canvas{display:block;width:100%;height:100%}
+.overlay{position:fixed;inset:0;pointer-events:none}
+.topline{position:absolute;top:28px;left:32px;right:32px;display:flex;justify-content:space-between;font-size:10px;letter-spacing:3px;color:#a89e86}
+.title{position:absolute;left:4.3%;top:17%;width:230px}
+.kicker{font-size:9px;letter-spacing:3px;color:#bd9660;margin-bottom:21px}
+h1{font-family:Georgia,serif;font-weight:400;font-size:clamp(34px,4.5vw,65px);line-height:1.02;letter-spacing:-2px;margin:0 0 22px}
+.description{font-size:11px;line-height:1.9;color:#928f84;max-width:180px}
+.rule{height:1px;width:45px;background:#a08250;margin:24px 0}
+.spec{font-size:9px;letter-spacing:1.7px;color:#ae9c7d;line-height:2.1}
+.telemetry{position:absolute;right:3.8%;top:34%;width:165px}
+.instrument{padding:17px 0;border-top:1px solid #b8a07830}
+.label{font-size:8px;letter-spacing:2px;color:#8f918e;margin-bottom:9px}
+.value{font-family:Georgia,serif;font-size:24px;color:#dac9a9}
+.unit{font-family:Arial,sans-serif;font-size:9px;letter-spacing:1px;color:#8b8a7f;margin-left:5px}
+.dot{display:inline-block;width:5px;height:5px;border-radius:100%;background:#d7ae68;vertical-align:middle;margin-right:8px;box-shadow:0 0 10px #e3ac50}
+.beats{display:flex;gap:7px;margin-top:11px}
+.beat{height:3px;flex:1;background:#a28a5533}
+.footer{position:absolute;bottom:26px;left:32px;right:32px;display:flex;align-items:end;justify-content:space-between;border-top:1px solid #a08f6929;padding-top:15px;font-size:8px;letter-spacing:2px;color:#8a8e89}
+.time{font-family:Georgia,serif;font-size:23px;letter-spacing:3px;color:#ddcfb5;margin-top:7px}
+.footer-right{text-align:right;line-height:1.9}
+#strike{transition:color .1s}
+@media(max-width:900px){.title{top:11%;left:25px;width:170px}h1{font-size:35px}.description,.rule,.spec{display:none}.telemetry{right:22px;top:auto;bottom:115px;width:115px}.value{font-size:20px}.instrument{padding:10px 0}.topline{left:24px;right:24px}.footer{left:24px;right:24px}}
+@media(max-width:600px){.title{top:75px}.kicker{margin-bottom:10px;font-size:8px}h1{font-size:28px;letter-spacing:-1px}.telemetry{bottom:102px;right:18px;width:90px}.instrument:nth-child(3){display:none}.label{font-size:7px;letter-spacing:1px}.value{font-size:17px}.topline{font-size:8px;letter-spacing:1.5px}.footer-right{max-width:140px;font-size:7px}.time{font-size:20px}}
+</style>
+</head>
+<body>
+<div class="overlay">
+  <div class="topline"><span>HOROLOGIUM / Nº 05</span><span>MECHANICAL STUDIES · 001</span></div>
+  <div class="title">
+    <div class="kicker">THE LIVING MACHINE</div>
+    <h1>Time,<br>in motion.</h1>
+    <div class="description">One pendulum sets an entire miniature world in motion.</div>
+    <div class="rule"></div>
+    <div class="spec">19 TRANSMISSION GEARS<br>2 CAM MECHANISMS<br>ONE MASTER ANGLE</div>
+  </div>
+  <div class="telemetry">
+    <div class="instrument">
+      <div class="label">01 / ESCAPEMENT</div>
+      <div class="value"><span class="dot" id="tickdot"></span>1<span class="unit">TICK / SEC</span></div>
+    </div>
+    <div class="instrument">
+      <div class="label">02 / BELL STRIKE</div>
+      <div class="value" id="strike">00<span class="unit">/ 05</span></div>
+      <div class="beats"><i class="beat"></i><i class="beat"></i><i class="beat"></i><i class="beat"></i><i class="beat"></i></div>
+    </div>
+    <div class="instrument">
+      <div class="label">03 / PLANETARY PERIODS</div>
+      <div class="value">1 : 4</div>
+      <div class="spec" style="font-size:8px;margin-top:8px">12 SECONDS / 48 SECONDS</div>
+    </div>
+  </div>
+  <div class="footer">
+    <div>MEAN MECHANICAL TIME<div class="time" id="readout">10:08:00</div></div>
+    <div class="footer-right"><span id="angle">MASTER θ · 0.000 RAD</span><br>CONTINUOUS INPUT / DISCRETE RELEASE</div>
+  </div>
+</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const PI=Math.PI,TAU=PI*2;
+const clamp=THREE.MathUtils.clamp;
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x080d12);
+scene.fog=new THREE.FogExp2(0x080d12,.023);
+
+const camera=new THREE.PerspectiveCamera(40,innerWidth/innerHeight,.1,100);
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
+renderer.setSize(innerWidth,innerHeight);
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.18;
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+
+const envCanvas=document.createElement('canvas');
+envCanvas.width=1024;envCanvas.height=512;
+const ec=envCanvas.getContext('2d');
+const eg=ec.createLinearGradient(0,0,0,512);
+eg.addColorStop(0,'#858d91');eg.addColorStop(.25,'#35414b');
+eg.addColorStop(.5,'#121820');eg.addColorStop(.75,'#414038');eg.addColorStop(1,'#151519');
+ec.fillStyle=eg;ec.fillRect(0,0,1024,512);
+function envPanel(x,y,w,h,color){
+  const g=ec.createLinearGradient(x,0,x+w,0);
+  g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(.18,color);
+  g.addColorStop(.82,color);g.addColorStop(1,'rgba(0,0,0,0)');
+  ec.fillStyle=g;ec.fillRect(x,y,w,h);
+}
+envPanel(90,65,150,235,'#d5dfed');
+envPanel(520,35,75,300,'#f5d6a0');
+envPanel(780,120,190,85,'#b3d4eb');
+const envTex=new THREE.CanvasTexture(envCanvas);
+envTex.colorSpace=THREE.SRGBColorSpace;
+envTex.mapping=THREE.EquirectangularReflectionMapping;
+const pmrem=new THREE.PMREMGenerator(renderer);
+scene.environment=pmrem.fromEquirectangular(envTex).texture;
+pmrem.dispose();envTex.dispose();
+
+scene.add(new THREE.HemisphereLight(0xa1c5e1,0x282015,1.5));
+const key=new THREE.DirectionalLight(0xffdc9e,4.3);
+key.position.set(-4,8,9);key.castShadow=true;
+key.shadow.mapSize.set(2048,2048);
+Object.assign(key.shadow.camera,{left:-7,right:7,top:8,bottom:-7,near:.1,far:35});
+key.shadow.bias=-.0007;key.shadow.normalBias=.025;
+scene.add(key);
+const fill=new THREE.DirectionalLight(0x83b7df,2.3);
+fill.position.set(6,2,4);scene.add(fill);
+const rim=new THREE.DirectionalLight(0xe0b164,3.4);
+rim.position.set(-4,4,-5);scene.add(rim);
+const warm=new THREE.PointLight(0xffb74b,18,10,2);
+warm.position.set(1,3,4);scene.add(warm);
+
+function metal(color,roughness=.3,metalness=.9){
+  return new THREE.MeshStandardMaterial({color,roughness,metalness});
+}
+const brass=metal(0xb9964e,.28);
+const pale=metal(0xd4bc7e,.26);
+const bronze=metal(0x89613b,.36);
+const copper=metal(0xb3734a,.32);
+const steel=metal(0x334a58,.28);
+const darkSteel=metal(0x151f27,.38);
+const silver=metal(0xa6b6b9,.24);
+const enamel=metal(0x132a34,.32,.65);
+const black=new THREE.MeshStandardMaterial({color:0x080b0c,roughness:.7,metalness:.2});
+const wood=new THREE.MeshStandardMaterial({color:0x291e18,roughness:.38,metalness:.15});
+const machine=new THREE.Group();scene.add(machine);
+
+const cylinderCache=new Map(),sphereCache=new Map();
+function cylinderGeometry(r,h=1){
+  const k=r+':'+h;
+  if(!cylinderCache.has(k))cylinderCache.set(k,new THREE.CylinderGeometry(r,r,h,24));
+  return cylinderCache.get(k);
+}
+function mesh(geo,mat,parent=machine){
+  const m=new THREE.Mesh(geo,mat);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;
+}
+function box(w,h,d,x,y,z,mat,parent=machine){
+  const m=mesh(new THREE.BoxGeometry(w,h,d),mat,parent);m.position.set(x,y,z);return m;
+}
+function cylZ(r,h,x,y,z,mat,parent=machine){
+  const m=mesh(cylinderGeometry(r,h),mat,parent);
+  m.rotation.x=PI/2;m.position.set(x,y,z);return m;
+}
+function cylY(r,h,x,y,z,mat,parent=machine){
+  const m=mesh(cylinderGeometry(r,h),mat,parent);m.position.set(x,y,z);return m;
+}
+function ball(r,x,y,z,mat,parent=machine){
+  if(!sphereCache.has(r))sphereCache.set(r,new THREE.SphereGeometry(r,20,14));
+  const m=mesh(sphereCache.get(r),mat,parent);m.position.set(x,y,z);return m;
+}
+function torus(r,t,x,y,z,mat,parent=machine){
+  const m=mesh(new THREE.TorusGeometry(r,t,8,80),mat,parent);m.position.set(x,y,z);return m;
+}
+const up=new THREE.Vector3(0,1,0);
+function setLink(m,a,b){
+  const av=new THREE.Vector3(...a),bv=new THREE.Vector3(...b),v=bv.clone().sub(av);
+  m.position.copy(av).add(bv).multiplyScalar(.5);
+  m.scale.y=v.length();
+  m.quaternion.setFromUnitVectors(up,v.normalize());
+}
+function link(a,b,r,mat,parent=machine){
+  const m=mesh(cylinderGeometry(r),mat,parent);setLink(m,a,b);return m;
+}
+function annulus(ro,ri,depth,mat,x,y,z,parent=machine){
+  const s=new THREE.Shape();s.absarc(0,0,ro,0,TAU,false);
+  const h=new THREE.Path();h.absarc(0,0,ri,0,TAU,true);s.holes.push(h);
+  const m=mesh(new THREE.ExtrudeGeometry(s,{depth,bevelEnabled:true,bevelSize:.012,bevelThickness:.012,bevelSegments:1,curveSegments:80}),mat,parent);
+  m.position.set(x,y,z);return m;
+}
+function plaque(text,w,h,x,y,z){
+  const c=document.createElement('canvas');c.width=1024;c.height=160;
+  const ctx=c.getContext('2d');
+  ctx.fillStyle='#ac8c51';ctx.fillRect(0,0,1024,160);
+  ctx.strokeStyle='#594425';ctx.lineWidth=6;ctx.strokeRect(12,12,1000,136);
+  ctx.fillStyle='#302a22';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.font='48px Georgia';ctx.fillText(text,512,84);
+  const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;
+  const m=mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshStandardMaterial({map:t,roughness:.46,metalness:.5}));
+  m.position.set(x,y,z);
+  for(const side of [-1,1])cylZ(.025,.015,x+side*(w/2-.07),y,z+.008,darkSteel);
+  return m;
+}
+
+// Open architectural case and rear bearing bed.
+box(9.05,.22,2.65,0,-5.17,-.15,wood);
+box(8.8,.10,2.5,0,-5.02,-.15,brass);
+box(9.35,.16,2.88,0,-5.36,-.15,darkSteel);
+box(8.4,.18,1.8,0,-4.87,-.32,wood);
+for(const x of [-4.22,4.22]){
+  cylY(.095,8.70,x,-.35,-1.12,brass);
+  cylY(.048,8.48,x,-.35,.37,bronze);
+  for(const y of [-4.67,-3.0,.0,3.7]){
+    cylY(.14,.13,x,y,-1.12,pale);
+    link([x,y,-1.15],[x,y,.4],.057,bronze);
+    ball(.085,x,y,.43,pale);
+  }
+  ball(.16,x,4.03,-1.12,brass);
+  link([x,3.7,-1.12],[x*.72,4.34,-1.12],.083,brass);
+}
+link([-3.04,4.34,-1.12],[3.04,4.34,-1.12],.083,brass);
+link([-4.22,-4.66,-1.12],[4.22,-4.66,-1.12],.077,bronze);
+for(const y of [-2,1.24,3.03]){
+  box(8.24,.12,.15,0,y,-1.32,darkSteel);
+  for(const x of [-3.4,0,3.4])cylZ(.095,.10,x,y,-1.20,brass);
+}
+plaque('H O R O L O G I U M',2.6,.28,0,4.19,-.85);
+plaque('THE WALKER',1.30,.19,-1.85,-4.85,1.1);
+plaque('FIVE-BEAT CHIME',1.68,.19,2.83,-4.85,1.1);
+
+const floor=mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshStandardMaterial({color:0x10161c,roughness:.48,metalness:.35}),scene);
+floor.rotation.x=-PI/2;floor.position.y=-5.46;
+
+// Involute teeth: common module and 20-degree pressure angle.
+// Pitch circles touch exactly. Child phase puts a tooth into a gap.
+const moduleSize=.06, pressure=20*PI/180, gearGeometries=new Map();
+function gearGeometry(n){
+  if(gearGeometries.has(n))return gearGeometries.get(n);
+  const pitch=n*moduleSize/2,base=pitch*Math.cos(pressure);
+  const root=pitch-1.25*moduleSize,tip=pitch+moduleSize;
+  const involute=r=>{
+    const q=Math.sqrt(Math.max(0,r*r/(base*base)-1));
+    return q-Math.atan(q);
+  };
+  const halfAtPitch=PI/(2*n),invPitch=Math.tan(pressure)-pressure;
+  const half=r=>halfAtPitch+invPitch-involute(Math.max(base,r));
+  const points=[];
+  const add=(r,a)=>points.push(new THREE.Vector2(r*Math.cos(a),r*Math.sin(a)));
+  for(let i=0;i<n;i++){
+    const a=i*TAU/n,rootHalf=half(Math.max(root,base));
+    add(root,a-rootHalf);
+    for(let j=0;j<=6;j++){
+      const r=Math.max(root,base)+(tip-Math.max(root,base))*j/6;
+      add(r,a-half(r));
+    }
+    for(let j=1;j<=4;j++)add(tip,a-half(tip)+2*half(tip)*j/4);
+    for(let j=6;j>=0;j--){
+      const r=Math.max(root,base)+(tip-Math.max(root,base))*j/6;
+      add(r,a+half(r));
+    }
+    add(root,a+rootHalf);
+    const end=(i+1)*TAU/n-rootHalf;
+    for(let j=1;j<=3;j++)add(root,a+rootHalf+(end-a-rootHalf)*j/3);
+  }
+  const shape=new THREE.Shape(points);
+  const center=new THREE.Path();center.absarc(0,0,.07,0,TAU,true);shape.holes.push(center);
+  const count=n>=30?6:n>=18?5:3;
+  const inner=n<=12?.14:.19,outer=root-.08;
+  if(outer>inner+.025){
+    for(let i=0;i<count;i++){
+      const a=i*TAU/count+.13,b=(i+1)*TAU/count-.13;
+      const h=new THREE.Path();
+      h.moveTo(inner*Math.cos(a),inner*Math.sin(a));
+      h.lineTo(outer*Math.cos(a),outer*Math.sin(a));
+      h.absarc(0,0,outer,a,b,false);
+      h.lineTo(inner*Math.cos(b),inner*Math.sin(b));
+      h.absarc(0,0,inner,b,a,true);h.closePath();shape.holes.push(h);
+    }
+  }
+  const g=new THREE.ExtrudeGeometry(shape,{depth:.105,bevelEnabled:true,bevelSize:.006,bevelThickness:.008,bevelSegments:1,curveSegments:8});
+  gearGeometries.set(n,g);return g;
+}
+const gears=[];
+function addGear(n,x,y,z,driver=null,compound=false){
+  const group=new THREE.Group();group.position.set(x,y,z);machine.add(group);
+  let ratio=1,phase=0;
+  if(driver){
+    if(compound){ratio=driver.ratio;}
+    else{
+      const beta=Math.atan2(y-driver.y,x-driver.x);
+      ratio=-driver.ratio*driver.n/n;
+      phase=((driver.n+n)*beta+n*PI-PI-driver.n*driver.phase)/n;
+    }
+  }
+  const mat=n===12?steel:n===18?brass:n===24?pale:n===30?copper:brass;
+  mesh(gearGeometry(n),mat,group);
+  cylZ(n<=12?.105:.14,.19,0,0,.06,bronze,group);
+  torus(n<=12?.104:.139,.013,0,0,.167,pale,group);
+  cylZ(.048,.23,0,0,.12,silver,group);
+  box(.052,.011,.014,0,0,.242,darkSteel,group);
+  const pitch=n*moduleSize/2,spokes=n>=30?6:n>=18?5:3;
+  for(let i=0;i<spokes;i++){
+    const a=i*TAU/spokes;
+    cylZ(.019,.012,pitch*.79*Math.cos(a),pitch*.79*Math.sin(a),.121,copper,group);
+  }
+  const axleFront=z+.23;
+  cylZ(.041,axleFront+1.39,x,y,(axleFront-1.39)/2,silver);
+  cylZ(.18,.075,x,y,-1.36,bronze);
+  torus(.13,.027,x,y,-1.30,pale);
+  const g={n,x,y,z,group,ratio,phase};gears.push(g);return g;
+}
+const root=addGear(36,0,-2,.18);
+const branches={};
+for(const side of [-1,1]){
+  const a=addGear(12,side*1.44,-2,.18,root);
+  const b=addGear(24,side*2.52,-2,.18,a);
+  const d=1.26/Math.sqrt(2),xx=side*(2.52+d);
+  const c=addGear(18,xx,-2+d,.18,b);
+  const d1=addGear(30,xx,-2+d+1.44,.18,c);
+  const e=addGear(18,xx,-2+d+2.88,.18,d1);
+  addGear(24,xx,-2+d+4.14,.18,e);
+  branches[side]=a;
+}
+const idler=addGear(18,0,-.38,.18,root);
+addGear(36,0,1.24,.18,idler);
+
+// Two compound stages: 36:12 × 48:12 = 12.
+// Their output shafts turn once per five seconds.
+const outputs={};
+for(const side of [-1,1]){
+  const z=side<0?-.88:-.56;
+  const big=addGear(48,side*1.44,-2,z,branches[side],true);
+  outputs[side]=addGear(12,side*2.52,-3.44,z,big);
+  link([side*1.44,-2,z-.12],[side*2.52,-3.44,z-.12],.062,darkSteel);
+}
+
+// Front skeleton dial.
+const dialY=1.24,dialZ=1.12;
+annulus(1.66,.90,.08,brass,0,dialY,dialZ-.08);
+torus(1.65,.042,0,dialY,dialZ+.025,pale);
+torus(.91,.032,0,dialY,dialZ+.035,bronze);
+const dc=document.createElement('canvas');dc.width=1536;dc.height=1536;
+const dx=dc.getContext('2d');dx.translate(768,768);
+const dg=dx.createRadialGradient(0,0,400,0,0,735);
+dg.addColorStop(0,'#e2d6b7');dg.addColorStop(.6,'#f1e7ce');dg.addColorStop(1,'#c7b68c');
+dx.fillStyle=dg;dx.beginPath();dx.arc(0,0,735,0,TAU);dx.arc(0,0,424,0,TAU,true);dx.fill();
+for(const r of [438,692,721]){
+  dx.strokeStyle='#9c8858';dx.lineWidth=r===438?3:2;dx.beginPath();dx.arc(0,0,r,0,TAU);dx.stroke();
+}
+for(let i=0;i<60;i++){
+  const a=i*TAU/60,inner=i%5===0?650:668;
+  dx.strokeStyle='#343a36';dx.lineWidth=i%5===0?5:2;
+  dx.beginPath();dx.moveTo(Math.sin(a)*inner,-Math.cos(a)*inner);
+  dx.lineTo(Math.sin(a)*689,-Math.cos(a)*689);dx.stroke();
+}
+const romans=['XII','I','II','III','IV','V','VI','VII','VIII','IX','X','XI'];
+dx.fillStyle='#29312f';dx.font='64px Georgia';dx.textAlign='center';dx.textBaseline='middle';
+for(let i=0;i<12;i++){
+  const a=i*TAU/12;
+  dx.fillText(romans[i],Math.sin(a)*580,-Math.cos(a)*580);
+}
+const dialTex=new THREE.CanvasTexture(dc);dialTex.colorSpace=THREE.SRGBColorSpace;
+const dialFace=mesh(new THREE.CircleGeometry(1.64,128),new THREE.MeshStandardMaterial({map:dialTex,transparent:true,roughness:.72,metalness:.08,alphaTest:.1}));
+dialFace.position.set(0,dialY,dialZ+.028);
+for(const a of [PI/4,3*PI/4,5*PI/4,7*PI/4]){
+  const x=Math.sin(a)*1.59,y=dialY+Math.cos(a)*1.59;
+  cylZ(.027,.018,x,y,dialZ+.052,bronze);
+}
+for(const a of [0,TAU/3,2*TAU/3]){
+  link([.19*Math.sin(a),dialY+.19*Math.cos(a),.85],[.92*Math.sin(a),dialY+.92*Math.cos(a),.85],.034,bronze);
+}
+cylZ(.20,.20,0,dialY,1.03,brass);
+
+function hand(length,width,mat,z,tail){
+  const s=new THREE.Shape();
+  s.moveTo(-width*.42,-tail);s.lineTo(-width*.6,.18);
+  s.lineTo(-width,.30);s.lineTo(-width*.38,length*.76);
+  s.lineTo(0,length);s.lineTo(width*.38,length*.76);
+  s.lineTo(width,.30);s.lineTo(width*.6,.18);s.lineTo(width*.42,-tail);s.closePath();
+  const g=new THREE.Group();g.position.set(0,dialY,z);machine.add(g);
+  mesh(new THREE.ExtrudeGeometry(s,{depth:.022,bevelEnabled:true,bevelSize:.008,bevelThickness:.008,bevelSegments:1}),mat,g);
+  return g;
+}
+const hourHand=hand(.94,.075,enamel,1.29,.18);
+const minuteHand=hand(1.31,.045,steel,1.35,.23);
+const secondHand=new THREE.Group();secondHand.position.set(0,dialY,1.44);machine.add(secondHand);
+box(.016,1.70,.02,0,.49,0,copper,secondHand);
+torus(.083,.014,0,-.30,0,brass,secondHand);
+cylZ(.095,.065,0,dialY,1.48,pale);
+cylZ(.045,.075,0,dialY,1.52,enamel);
+
+// Thirty escape teeth, two beats per tooth: sixty beats per revolution.
+const escapeShape=new THREE.Shape();
+for(let i=0;i<30;i++){
+  const a=i*TAU/30;
+  const pts=[[.70,a],[.88,a+.045],[.90,a+.067],[.73,a+.15]];
+  pts.forEach(([r,b],j)=>{
+    const x=r*Math.cos(b),y=r*Math.sin(b);
+    if(i===0&&j===0)escapeShape.moveTo(x,y);else escapeShape.lineTo(x,y);
+  });
+}
+escapeShape.closePath();
+for(let i=0;i<5;i++){
+  const a=i*TAU/5;
+  const h=new THREE.Path();h.absarc(.43*Math.cos(a),.43*Math.sin(a),.20,0,TAU,true);
+  escapeShape.holes.push(h);
+}
+const escapeWheel=mesh(new THREE.ExtrudeGeometry(escapeShape,{depth:.06,bevelEnabled:true,bevelSize:.006,bevelThickness:.006,bevelSegments:1}),pale);
+escapeWheel.position.set(0,-2,1.01);
+cylZ(.14,.18,0,-2,1.10,bronze);
+
+const pendulum=new THREE.Group();pendulum.position.set(0,-.82,1.43);machine.add(pendulum);
+link([0,0,0],[0,-3.55,0],.022,pale,pendulum);
+link([-.033,-.9,0],[-.033,-3.2,0],.01,steel,pendulum);
+cylZ(.35,.11,0,-3.55,0,brass,pendulum);
+cylZ(.294,.13,0,-3.55,.018,bronze,pendulum);
+torus(.288,.023,0,-3.55,.09,pale,pendulum);
+cylZ(.25,.018,0,-3.55,.098,brass,pendulum);
+link([-.22,-3.55,.12],[.22,-3.55,.12],.012,darkSteel,pendulum);
+cylZ(.063,.07,0,-3.55,.135,pale,pendulum);
+link([0,0,0],[-.70,-.54,0],.048,steel,pendulum);
+link([0,0,0],[.70,-.54,0],.048,steel,pendulum);
+const palletMatL=new THREE.MeshStandardMaterial({color:0xbc8552,metalness:.82,roughness:.27,emissive:0xffaa33,emissiveIntensity:0});
+const palletMatR=palletMatL.clone();
+const palletL=box(.10,.28,.10,-.735,-.64,0,palletMatL,pendulum);palletL.rotation.z=-.35;
+const palletR=box(.10,.28,.10,.735,-.64,0,palletMatR,pendulum);palletR.rotation.z=.35;
+cylZ(.115,.17,0,-.82,1.47,bronze);
+cylZ(.059,.19,0,-.82,1.51,pale);
+
+// Orrery above the dial. Both arms share the same master phase.
+cylY(.10,.65,0,3.06,.45,bronze);
+cylY(.22,.07,0,2.80,.45,brass);
+cylY(.15,.08,0,3.39,.45,pale);
+const cosmos=new THREE.Group();cosmos.position.set(0,3.52,.45);cosmos.rotation.x=.16;machine.add(cosmos);
+const sunMat=new THREE.MeshStandardMaterial({color:0xefc35c,metalness:.75,roughness:.25,emissive:0xa34b05,emissiveIntensity:.3});
+ball(.20,0,0,0,sunMat,cosmos);
+torus(.23,.011,0,0,0,pale,cosmos);
+const planetArms=[];
+for(let i=0;i<2;i++){
+  const radius=i===0?.68:1.18;
+  const ring=torus(radius,.009,0,0,0,bronze,cosmos);ring.rotation.x=PI/2;
+  const arm=new THREE.Group();cosmos.add(arm);
+  link([-.24,-.045,0],[radius,-.045,0],.021,brass,arm);
+  cylY(.022,.13,radius,.005,0,pale,arm);
+  ball(i===0?.12:.16,radius,.09,0,i===0?enamel:copper,arm);
+  ball(.045,-.23,-.045,0,bronze,arm);
+  if(i===1){
+    const ring2=torus(.225,.018,radius,.09,0,pale,arm);ring2.rotation.x=1.08;
+  }else{
+    const band=torus(.122,.007,radius,.09,0,pale,arm);band.rotation.x=.5;
+  }
+  planetArms.push(arm);
+}
+for(let i=0;i<48;i++){
+  const a=i*TAU/48;
+  link([1.19*Math.cos(a),0,1.19*Math.sin(a)],[1.23*Math.cos(a),0,1.23*Math.sin(a)],.007,pale,cosmos);
+}
+
+// Cam geometry is sampled from its actual polar profile.
+function camGeometry(profile){
+  const s=new THREE.Shape();
+  for(let i=0;i<=240;i++){
+    const a=TAU*i/240,r=profile(a),x=r*Math.cos(a),y=r*Math.sin(a);
+    if(!i)s.moveTo(x,y);else s.lineTo(x,y);
+  }
+  s.closePath();
+  const hole=new THREE.Path();hole.absarc(0,0,.065,0,TAU,true);s.holes.push(hole);
+  return new THREE.ExtrudeGeometry(s,{depth:.07,bevelEnabled:true,bevelSize:.006,bevelThickness:.006,bevelSegments:1});
+}
+const fract=x=>x-Math.floor(x);
+const camX=2.52,camY=-3.44;
+const snail=mesh(camGeometry(a=>.255+.22*fract((a-PI/2)/TAU)),copper);
+snail.position.set(camX,camY,1.15);
+cylZ(.09,.22,camX,camY,1.2,pale);
+torus(.53,.012,camX,camY,.96,bronze);
+const roller=cylZ(.055,.13,camX,camY+.31,1.27,silver);
+const follower=link([camX,-3.1,1.27],[camX,-2.82,1.27],.023,steel);
+box(.15,.10,.18,camX,-2.98,1.17,bronze);
+link([camX,-2.98,1.12],[2.88,-2.98,.7],.04,darkSteel);
+const hammer=new THREE.Group();hammer.position.set(1.70,-2.79,1.47);machine.add(hammer);
+link([0,0,0],[1.60,0,0],.036,steel,hammer);
+link([1.60,0,0],[1.60,-.82,0],.038,steel,hammer);
+box(.26,.18,.22,1.60,-.82,0,bronze,hammer);
+cylZ(.093,.17,1.70,-2.79,1.48,pale);
+link([1.70,-2.79,.3],[1.70,-2.79,1.46],.06,darkSteel);
+
+// Hollow lathed bell with a suspended clapper.
+const bell=new THREE.Group();bell.position.set(3.48,-3.30,1.55);machine.add(bell);
+const bellPoints=[[.075,0],[.10,-.12],[.16,-.26],[.23,-.43],[.32,-.64],[.46,-.78],[.49,-.80],[.49,-.85],[.43,-.84],[.36,-.74],[.26,-.57],[.18,-.37],[.09,-.18],[.055,-.12]];
+mesh(new THREE.LatheGeometry(bellPoints.map(p=>new THREE.Vector2(...p)),64),pale,bell);
+const lip=torus(.475,.023,0,-.818,0,brass,bell);lip.rotation.x=PI/2;
+link([0,-.1,0],[0,-.69,0],.016,darkSteel,bell);
+ball(.065,0,-.70,0,bronze,bell);
+ball(.08,0,.015,0,brass,bell);
+link([3.48,-3.27,1.55],[3.48,-2.89,1.55],.024,bronze);
+link([3.48,-2.89,1.55],[4.18,-2.89,.40],.046,steel);
+const flashes=[];
+for(let i=0;i<3;i++){
+  const mat=new THREE.MeshBasicMaterial({color:0xfbd790,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending});
+  const r=mesh(new THREE.TorusGeometry(.54,.011,6,80),mat);
+  r.position.set(3.48,-3.80,1.72);r.castShadow=false;flashes.push(r);
+}
+
+// Three-lobe walking cam, with two opposite-phase tracks on one shaft.
+const walkerCamX=-2.52,walkerCamY=-3.44;
+const walkingCams=[],legs=[];
+for(let i=0;i<2;i++){
+  const phase=i*PI;
+  const cam=mesh(camGeometry(a=>.265+.085*Math.cos(3*a+phase)),i?bronze:copper);
+  cam.position.set(walkerCamX,walkerCamY,1.05+i*.17);walkingCams.push(cam);
+}
+cylZ(.081,.40,walkerCamX,walkerCamY,1.22,pale);
+torus(.39,.01,walkerCamX,walkerCamY,.97,bronze);
+const hipX=-1.27,hipY=-3.95;
+box(.27,.34,.22,hipX,hipY+.29,1.50,enamel);
+box(.30,.075,.25,hipX,hipY+.07,1.50,brass);
+cylY(.055,.11,hipX+.015,hipY+.52,1.50,bronze);
+ball(.145,hipX+.025,hipY+.66,1.50,pale);
+ball(.041,hipX+.155,hipY+.65,1.55,brass);
+ball(.018,hipX+.082,hipY+.69,1.632,black);
+const hat=mesh(new THREE.SphereGeometry(.155,20,12,0,TAU,0,PI/2),copper);
+hat.position.set(hipX+.025,hipY+.71,1.50);
+box(.28,.025,.28,hipX+.06,hipY+.71,1.50,bronze);
+cylZ(.095,.32,hipX,hipY,1.50,bronze);
+const walkerArms=[];
+for(let i=0;i<2;i++){
+  const z=1.37+i*.29;
+  const a=new THREE.Group();a.position.set(hipX,hipY+.42,z);machine.add(a);
+  link([0,0,0],[.015,-.23,0],.032,enamel,a);
+  link([.015,-.23,0],[.14,-.38,0],.025,brass,a);
+  ball(.042,.14,-.38,0,pale,a);walkerArms.push(a);
+  const roller=cylZ(.047,.08,-2.2,walkerCamY,1.15+i*.17,silver);
+  const rod=link([-2.2,walkerCamY,z],[hipX,hipY,z],.014,silver);
+  const lever=link([hipX,hipY,z],[hipX-.19,hipY,z],.023,bronze);
+  const thigh=link([hipX,hipY,z],[hipX,hipY-.43,z],.042,enamel);
+  const shin=link([hipX,hipY-.43,z],[hipX,hipY-.86,z],.031,brass);
+  const knee=ball(.055,hipX,hipY-.43,z,pale);
+  const ankle=ball(.04,hipX,hipY-.85,z,bronze);
+  const boot=box(.22,.09,.13,hipX+.045,hipY-.87,z,darkSteel);
+  const pin=ball(.034,hipX-.19,hipY,z,pale);
+  legs.push({z,roller,rod,lever,thigh,shin,knee,ankle,boot,pin});
+}
+box(1.34,.065,.65,-1.26,-4.85,1.43,darkSteel);
+for(const x of [-1.79,-.73])link([x,-4.86,.95],[x,-4.86,1.74],.035,pale);
+
+// Dust is procedural, and its motion is also a function of the master.
+let seed=58217;
+function rand(){seed=(seed*1664525+0x3C6EF35F)>>>0;return seed/4294967296;}
+const dustCount=160,dustSeeds=[],dustPositions=new Float32Array(dustCount*3);
+for(let i=0;i<dustCount;i++)dustSeeds.push([rand()*14-7,rand()*13-6.5,rand()*7-2,rand()*TAU]);
+const dustGeo=new THREE.BufferGeometry();
+dustGeo.setAttribute('position',new THREE.BufferAttribute(dustPositions,3));
+const dust=new THREE.Points(dustGeo,new THREE.PointsMaterial({color:0xe9c898,size:.018,transparent:true,opacity:.43,depthWrite:false,blending:THREE.AdditiveBlending}));
+scene.add(dust);
+
+const dot=document.getElementById('tickdot'),strikeText=document.getElementById('strike');
+const beatEls=[...document.querySelectorAll('.beat')],readout=document.getElementById('readout'),angleText=document.getElementById('angle');
+let cameraDistance=17,lastTick=-1;
+function resize(){
+  camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+  const visibleHeight=Math.max(11.7,10.25/camera.aspect);
+  cameraDistance=visibleHeight/(2*Math.tan(camera.fov*PI/360));
+}
+addEventListener('resize',resize);resize();
+const started=performance.now();
+const smooth=x=>x*x*(3-2*x);
+const pad=n=>String(n).padStart(2,'0');
+
+function render(now){
+  requestAnimationFrame(render);
+
+  // The sole independent motion coordinate. Everything below derives from it.
+  const master=(now-started)*.001*PI;
+  const t=master/PI,beat=Math.floor(t),fraction=fract(t);
+  // Wheel advances during the final 160 ms of each beat, then locks.
+  const release=smooth(clamp((fraction-.84)/.16,0,1));
+  const stepped=beat+release;
+  const driveAngle=-TAU*stepped/60;
+  const camAngle=12*driveAngle;
+
+  for(const g of gears)g.group.rotation.z=g.phase+g.ratio*driveAngle;
+  escapeWheel.rotation.z=driveAngle;
+  pendulum.rotation.z=.175*Math.cos(master);
+  const tickGlow=Math.exp(-fraction*12);
+  palletMatL.emissiveIntensity=(beat%2===0?1:0)*tickGlow*.9;
+  palletMatR.emissiveIntensity=(beat%2===1?1:0)*tickGlow*.9;
+  secondHand.rotation.z=driveAngle;
+  minuteHand.rotation.z=-TAU*(8/60+stepped/3600);
+  hourHand.rotation.z=-TAU*(10/12+8/720+stepped/43200);
+
+  planetArms[0].rotation.y=-master/6;
+  planetArms[1].rotation.y=-master/24;
+
+  snail.rotation.z=camAngle;
+  const camLift=.22*fract(stepped/5);
+  const followerY=camY+.255+camLift+.055;
+  roller.position.y=followerY;
+  const hammerAngle=Math.atan2(camLift,.82);
+  hammer.rotation.z=hammerAngle;
+  const leverContactY=-2.79+.82*Math.tan(hammerAngle);
+  setLink(follower,[camX,followerY,1.27],[camX,leverContactY,1.27]);
+
+  const strikeAge=t-5*Math.floor(t/5);
+  const striking=beat>=5;
+  const decay=striking?Math.exp(-strikeAge*4):0;
+  bell.rotation.z=.085*Math.sin(strikeAge*43)*decay;
+  bell.rotation.x=.035*Math.sin(strikeAge*31)*decay;
+  for(let i=0;i<flashes.length;i++){
+    const age=strikeAge-i*.105;
+    const active=striking&&age>=0&&age<1.1;
+    flashes[i].visible=active;
+    if(active){
+      flashes[i].scale.setScalar(1+age*1.85);
+      flashes[i].material.opacity=.56*Math.exp(-age*4);
+    }
+  }
+
+  for(let i=0;i<2;i++){
+    const leg=legs[i],phase=i*PI;
+    walkingCams[i].rotation.z=camAngle;
+    // A roller samples the cam at the right-hand contact. Its rod length
+    // is fixed; circle intersection solves the driven hip lever.
+    const radius=.265+.085*Math.cos(-3*camAngle+phase);
+    const sx=walkerCamX+radius+.047,sy=walkerCamY;
+    leg.roller.position.x=sx;
+    const vx=sx-hipX,vy=sy-hipY,d=Math.hypot(vx,vy);
+    const leverLength=.19,rodLength=.96;
+    const theta=Math.atan2(vy,vx)+Math.acos(clamp((d*d+leverLength*leverLength-rodLength*rodLength)/(2*d*leverLength),-1,1));
+    const px=hipX+leverLength*Math.cos(theta),py=hipY+leverLength*Math.sin(theta);
+    const thighAngle=theta-3.88;
+    const kx=hipX+.43*Math.sin(thighAngle),ky=hipY-.43*Math.cos(thighAngle);
+    const shinAngle=-.10-.65*Math.max(0,Math.sin(thighAngle*2));
+    const fx=kx+.43*Math.sin(shinAngle),fy=ky-.43*Math.cos(shinAngle);
+    setLink(leg.rod,[sx,sy,leg.z],[px,py,leg.z]);
+    setLink(leg.lever,[hipX,hipY,leg.z],[px,py,leg.z]);
+    setLink(leg.thigh,[hipX,hipY,leg.z],[kx,ky,leg.z]);
+    setLink(leg.shin,[kx,ky,leg.z],[fx,fy,leg.z]);
+    leg.pin.position.set(px,py,leg.z);
+    leg.knee.position.set(kx,ky,leg.z);
+    leg.ankle.position.set(fx,fy,leg.z);
+    leg.boot.position.set(fx+.055,fy-.025,leg.z);
+    leg.boot.rotation.z=shinAngle*.35;
+    walkerArms[i].rotation.z=-thighAngle*.85;
+  }
+
+  for(let i=0;i<dustCount;i++){
+    const [x,y,z,p]=dustSeeds[i];
+    dustPositions[i*3]=x+.11*Math.sin(master*.055+p);
+    dustPositions[i*3+1]=((y+6.5+t*.035)%13)-6.5;
+    dustPositions[i*3+2]=z+.12*Math.cos(master*.042+p);
+  }
+  dustGeo.attributes.position.needsUpdate=true;
+
+  const push=.65*(1-Math.exp(-master/90));
+  camera.position.set(.82+.22*Math.sin(master*.021),.62+.13*Math.sin(master*.027),cameraDistance+.6-push);
+  camera.lookAt(0,-.48,.2);
+
+  dot.style.opacity=String(.25+.75*tickGlow);
+  if(beat!==lastTick){
+    lastTick=beat;
+    const total=10*3600+8*60+beat;
+    readout.textContent=`${pad(Math.floor(total/3600)%12||12)}:${pad(Math.floor(total/60)%60)}:${pad(total%60)}`;
+    const count=beat===0?0:(beat-1)%5+1;
+    strikeText.innerHTML=`${pad(count)}<span class="unit">/ 05</span>`;
+    for(let i=0;i<5;i++)beatEls[i].style.background=i<count?'#bda16c':'#a28a5533';
+  }
+  strikeText.style.color=striking&&strikeAge<.7?'#ffe0a1':'#dac9a9';
+  angleText.textContent=`MASTER θ · ${master.toFixed(3)} RAD`;
+  renderer.render(scene,camera);
+}
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

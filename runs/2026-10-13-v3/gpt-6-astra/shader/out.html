@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#03070e">
+<title>Chrysalis — Liquid Geometry</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #03070e; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .signature {
+    position: fixed; left: max(25px, env(safe-area-inset-left));
+    bottom: max(24px, env(safe-area-inset-bottom));
+    color: #cfdee1; pointer-events: none; user-select: none;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+  }
+  .signature h1 {
+    margin: 0 0 7px; font-size: 13px; font-weight: 400;
+    letter-spacing: .42em; text-transform: uppercase;
+  }
+  .signature p {
+    margin: 0; font-size: 9px; letter-spacing: .19em;
+    color: #779094; text-transform: uppercase;
+  }
+  .edition {
+    position: fixed; right: max(25px, env(safe-area-inset-right));
+    bottom: max(25px, env(safe-area-inset-bottom));
+    color: #779094; font: 9px ui-monospace, monospace;
+    letter-spacing: .12em; pointer-events: none;
+  }
+  #fallback {
+    position: fixed; inset: 0; padding: 30px; place-content: center;
+    color: #cfdee1; font: 15px/1.6 system-ui, sans-serif; text-align: center;
+    background: #03070e;
+  }
+  #fallback:not([hidden]) { display: grid; }
+</style>
+</head>
+<body>
+<canvas id="world" aria-label="Animated molten sculptures blending above a reflective tiled floor"></canvas>
+<div class="signature"><h1>Chrysalis</h1><p>A study in liquid geometry</p></div>
+<div class="edition">SDF / 006</div>
+<div id="fallback" hidden>This scene requires a browser with WebGL 2 enabled.</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const vertexShader = `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}
+`;
+
+const fragmentShader = `
+precision highp float;
+
+varying vec2 vUv;
+uniform vec2 uResolution;
+uniform float uTime;
+uniform float uBlend;
+uniform float uRadius;
+uniform float uRoll;
+uniform vec3 uEye;
+uniform vec3 uTarget;
+uniform vec3 uCenters[7];
+uniform mat3 uRotations[6];
+uniform vec4 uSparks[28];
+
+const float PI = 3.14159265359;
+const float TAU = 6.28318530718;
+const float FLOOR_Y = -1.45;
+const float FAR = 70.0;
+const vec3 BOUND_CENTER = vec3(0.0, 0.25, 0.0);
+const float BOUND_RADIUS = 3.2;
+
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+vec3 hash33(vec3 p) {
+  p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+  p += dot(p, p.yxz + 33.33);
+  return fract((p.xxy + p.yxx) * p.zyx);
+}
+
+float noise3(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = dot(hash33(i), vec3(0.333333));
+  float b = dot(hash33(i + vec3(1,0,0)), vec3(0.333333));
+  float c = dot(hash33(i + vec3(0,1,0)), vec3(0.333333));
+  float d = dot(hash33(i + vec3(1,1,0)), vec3(0.333333));
+  float e = dot(hash33(i + vec3(0,0,1)), vec3(0.333333));
+  float f1 = dot(hash33(i + vec3(1,0,1)), vec3(0.333333));
+  float g = dot(hash33(i + vec3(0,1,1)), vec3(0.333333));
+  float h = dot(hash33(i + vec3(1,1,1)), vec3(0.333333));
+  return mix(
+    mix(mix(a,b,f.x), mix(c,d,f.x), f.y),
+    mix(mix(e,f1,f.x), mix(g,h,f.x), f.y),
+    f.z
+  );
+}
+
+float sdSphere(vec3 p, float r) {
+  return length(p) - r;
+}
+
+float sdTorus(vec3 p, vec2 radii) {
+  return length(vec2(length(p.xz) - radii.x, p.y)) - radii.y;
+}
+
+float sdBox(vec3 p, vec3 b) {
+  vec3 q = abs(p) - b;
+  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+
+float sdCapsule(vec3 p, vec3 a, vec3 b, float r) {
+  vec3 pa = p - a;
+  vec3 ba = b - a;
+  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - r;
+}
+
+float sdCylinder(vec3 p, float radius, float halfHeight) {
+  vec2 d = vec2(length(p.xz) - radius, abs(p.y) - halfHeight);
+  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
+}
+
+float sdOctahedron(vec3 p, float s) {
+  p = abs(p);
+  float m = p.x + p.y + p.z - s;
+  vec3 q;
+  if (3.0 * p.x < m) q = p.xyz;
+  else if (3.0 * p.y < m) q = p.yzx;
+  else if (3.0 * p.z < m) q = p.zxy;
+  else return m * 0.57735026919;
+  float k = clamp(0.5 * (q.z - q.y + s), 0.0, s);
+  return length(vec3(q.x, q.y - s + k, q.z - k));
+}
+
+// Distanza, coordinata del materiale, peso della lava.
+vec3 smoothUnion(vec3 a, vec3 b, float k) {
+  float h = clamp(0.5 + 0.5 * (b.x - a.x) / k, 0.0, 1.0);
+  vec3 result = mix(b, a, h);
+  result.x -= k * h * (1.0 - h);
+  return result;
+}
+
+vec3 field(vec3 p) {
+  vec3 result = vec3(sdSphere(p - uCenters[0], uRadius), 0.0, 1.0);
+
+  vec3 q = uRotations[0] * (p - uCenters[1]);
+  result = smoothUnion(
+    result, vec3(sdTorus(q, vec2(0.70, 0.205)), 1.0, 0.0), uBlend
+  );
+
+  q = uRotations[1] * (p - uCenters[2]);
+  result = smoothUnion(
+    result, vec3(sdBox(q, vec3(0.44)) - 0.105, 2.0, 0.0), uBlend
+  );
+
+  q = uRotations[2] * (p - uCenters[3]);
+  result = smoothUnion(
+    result,
+    vec3(sdCapsule(q, vec3(0,-0.56,0), vec3(0,0.56,0), 0.29), 3.0, 0.0),
+    uBlend * 0.9
+  );
+
+  q = uRotations[3] * (p - uCenters[4]);
+  result = smoothUnion(
+    result, vec3(sdCylinder(q, 0.37, 0.46) - 0.055, 4.0, 0.0), uBlend
+  );
+
+  q = uRotations[4] * (p - uCenters[5]);
+  result = smoothUnion(
+    result, vec3(sdOctahedron(q, 0.88) - 0.045, 5.0, 0.0), uBlend * 0.8
+  );
+
+  result = smoothUnion(
+    result, vec3(sdSphere(p - uCenters[6], 0.31), 6.0, 0.0), uBlend * 0.85
+  );
+
+  return result;
+}
+
+vec2 boundInterval(vec3 ro, vec3 rd) {
+  vec3 oc = ro - BOUND_CENTER;
+  float b = dot(oc, rd);
+  float h = b * b - dot(oc, oc) + BOUND_RADIUS * BOUND_RADIUS;
+  if (h < 0.0) return vec2(1.0, -1.0);
+  h = sqrt(h);
+  return vec2(-b - h, -b + h);
+}
+
+// Il pavimento è analitico; solo le sculture richiedono il raymarch.
+vec3 traceScene(vec3 ro, vec3 rd, bool secondary) {
+  vec3 result = vec3(FAR, -2.0, 0.0);
+
+  if (abs(rd.y) > 0.00001) {
+    float planeT = (FLOOR_Y - ro.y) / rd.y;
+    if (planeT > 0.002 && planeT < FAR) {
+      result = vec3(planeT, -1.0, 0.0);
+    }
+  }
+
+  vec2 interval = boundInterval(ro, rd);
+  float t = max(interval.x, 0.003);
+  float endT = min(interval.y, result.x);
+
+  if (endT < t) return result;
+
+  for (int i = 0; i < 96; i++) {
+    if (secondary && i >= 56) break;
+    if (t > endT) break;
+
+    vec3 sampleValue = field(ro + rd * t);
+    float epsilon = 0.0009 + t * 0.00018;
+
+    if (sampleValue.x < epsilon) {
+      return vec3(t, sampleValue.yz);
+    }
+
+    t += max(sampleValue.x * 0.88, 0.0007);
+  }
+
+  return result;
+}
+
+vec3 surfaceNormal(vec3 p) {
+  vec2 e = vec2(0.0014, -0.0014);
+  return normalize(
+    e.xyy * field(p + e.xyy).x +
+    e.yyx * field(p + e.yyx).x +
+    e.yxy * field(p + e.yxy).x +
+    e.xxx * field(p + e.xxx).x
+  );
+}
+
+float ambientOcclusion(vec3 p, vec3 n) {
+  float occlusion = 0.0;
+  float weight = 1.0;
+  for (int i = 0; i < 5; i++) {
+    float h = 0.045 + 0.13 * float(i);
+    float d = field(p + n * h).x;
+    occlusion += max(h - d, 0.0) * weight;
+    weight *= 0.65;
+  }
+  return clamp(1.0 - 2.2 * occlusion, 0.12, 1.0);
+}
+
+float softShadow(vec3 p, vec3 lightDirection) {
+  vec2 interval = boundInterval(p, lightDirection);
+  float t = max(0.025, interval.x);
+  float endT = min(9.0, interval.y);
+  if (endT <= t) return 1.0;
+
+  float visibility = 1.0;
+  for (int i = 0; i < 28; i++) {
+    if (t > endT) break;
+    float h = field(p + lightDirection * t).x;
+    if (h < 0.0012) return 0.025;
+    visibility = min(visibility, 10.0 * h / max(t, 0.02));
+    t += clamp(h, 0.025, 0.48);
+  }
+  return clamp(visibility, 0.025, 1.0);
+}
+
+float cellularCracks(vec3 p) {
+  vec3 cell = floor(p);
+  vec3 local = fract(p);
+  float nearest = 100.0;
+  float second = 100.0;
+
+  for (int x = -1; x <= 1; x++) {
+    for (int y = -1; y <= 1; y++) {
+      for (int z = -1; z <= 1; z++) {
+        vec3 offset = vec3(float(x), float(y), float(z));
+        vec3 point = offset + 0.15 + 0.7 * hash33(cell + offset) - local;
+        float d = dot(point, point);
+        if (d < nearest) {
+          second = nearest;
+          nearest = d;
+        } else {
+          second = min(second, d);
+        }
+      }
+    }
+  }
+  return sqrt(second) - sqrt(nearest);
+}
+
+vec3 materialPalette(float id) {
+  vec3 a = vec3(0.15, 0.20, 0.25);
+  vec3 b = vec3(0.035, 0.59, 0.56);
+  vec3 c = vec3(0.92, 0.48, 0.15);
+  vec3 d = vec3(0.18, 0.25, 0.70);
+  vec3 e = vec3(0.53, 0.78, 0.75);
+  vec3 f = vec3(0.73, 0.20, 0.32);
+  vec3 g = vec3(0.44, 0.68, 0.85);
+  if (id < 1.0) return mix(a, b, clamp(id, 0.0, 1.0));
+  if (id < 2.0) return mix(b, c, id - 1.0);
+  if (id < 3.0) return mix(c, d, id - 2.0);
+  if (id < 4.0) return mix(d, e, id - 3.0);
+  if (id < 5.0) return mix(e, f, id - 4.0);
+  return mix(f, g, clamp(id - 5.0, 0.0, 1.0));
+}
+
+struct Material {
+  vec3 color;
+  vec3 emission;
+  float metal;
+  float roughness;
+};
+
+Material materialAt(vec3 p, vec3 hit) {
+  Material m;
+  m.emission = vec3(0.0);
+
+  if (hit.y < -0.5) {
+    vec2 grid = p.xz * 0.72;
+    float filterWidth = clamp(0.004 + hit.x * 0.0018, 0.005, 0.3);
+    vec2 cell = smoothstep(
+      vec2(-filterWidth), vec2(filterWidth), sin(PI * grid)
+    );
+    float checker = cell.x * cell.y + (1.0 - cell.x) * (1.0 - cell.y);
+    m.color = mix(vec3(0.025,0.035,0.047), vec3(0.18,0.22,0.245), checker);
+
+    vec2 edge = min(fract(grid), 1.0 - fract(grid));
+    float seam = 1.0 - smoothstep(0.0, 0.009, min(edge.x, edge.y));
+    m.color *= 1.0 - seam * 0.42;
+    float ring = exp(-abs(length(p.xz) - 2.85) * 95.0);
+    m.emission = vec3(0.025, 0.22, 0.23) * ring;
+    m.metal = 0.40;
+    m.roughness = 0.25;
+    return m;
+  }
+
+  m.color = materialPalette(hit.y);
+  m.metal = 0.83;
+  m.roughness = 0.22;
+
+  float lava = clamp(hit.z, 0.0, 1.0);
+  if (lava > 0.01) {
+    vec3 q = uRotations[5] * (p - uCenters[0]);
+    q *= 3.65;
+    q += 0.18 * sin(q.yzx * 1.7 + vec3(0.0, 1.8, 3.1));
+
+    float border = cellularCracks(q);
+    float crack = 1.0 - smoothstep(0.016, 0.066, border);
+    float glow = 1.0 - smoothstep(0.035, 0.18, border);
+    float pulse = 0.58 + 0.42 * sin(uTime * 2.1 - q.y * 1.5 + q.x * 0.55);
+    float grain = noise3(q * 3.7);
+
+    vec3 basalt = vec3(0.024, 0.019, 0.022) * (0.65 + 0.8 * grain);
+    m.color = mix(m.color, basalt, lava);
+    m.metal = mix(m.metal, 0.24, lava);
+    m.roughness = mix(m.roughness, 0.54, lava);
+    m.emission = lava * (
+      crack * mix(vec3(4.0,0.22,0.008), vec3(12.0,2.5,0.16), pulse) +
+      glow * vec3(0.36,0.024,0.002)
+    );
+  }
+
+  return m;
+}
+
+vec3 sky(vec3 rd) {
+  float horizon = exp(-abs(rd.y) * 4.0);
+  vec3 col = mix(vec3(0.003,0.007,0.018), vec3(0.025,0.055,0.078), horizon);
+
+  float blueCloud = pow(max(dot(rd, normalize(vec3(-0.7,0.22,-0.7))), 0.0), 5.0);
+  float roseCloud = pow(max(dot(rd, normalize(vec3(0.7,0.15,0.55))), 0.0), 8.0);
+  col += blueCloud * vec3(0.015,0.040,0.075);
+  col += roseCloud * vec3(0.045,0.012,0.031);
+
+  vec2 sphereUV = vec2(atan(rd.z, rd.x) / TAU + 0.5, asin(clamp(rd.y,-1.0,1.0)) / PI + 0.5);
+  vec2 cells = sphereUV * vec2(310.0,155.0);
+  vec2 cellID = floor(cells);
+  float seed = hash12(cellID);
+  vec2 offset = vec2(hash12(cellID + 7.1), hash12(cellID + 29.3));
+  vec2 delta = fract(cells) - (0.15 + 0.7 * offset);
+  float star = exp(-dot(delta,delta) * 550.0);
+  float twinkle = 0.65 + 0.35 * sin(uTime * 0.7 + seed * 100.0);
+  col += star * step(0.982, seed) * twinkle * vec3(0.6,0.78,1.0) * 1.6;
+
+  return col;
+}
+
+vec3 environment(vec3 rd, float roughness) {
+  vec3 col = sky(rd);
+
+  vec3 key = normalize(vec3(-0.55,0.8,0.42));
+  vec3 fill = normalize(vec3(0.75,0.35,-0.65));
+  vec3 strip = normalize(vec3(-0.6,0.12,-0.75));
+
+  float exponent = mix(95.0, 9.0, roughness);
+  col += vec3(3.8,3.0,2.1) * pow(max(dot(rd,key),0.0), exponent);
+  col += vec3(0.25,1.9,2.6) * pow(max(dot(rd,fill),0.0), exponent * 0.65);
+  col += vec3(1.9,0.25,0.5) * pow(max(dot(rd,strip),0.0), exponent * 0.85);
+
+  float ribbon = exp(-pow((rd.y - 0.48) / (0.065 + roughness * 0.23), 2.0));
+  col += ribbon * vec3(0.22,0.38,0.43) * 0.6;
+  return col;
+}
+
+vec3 fresnelSchlick(float cosine, vec3 f0) {
+  return f0 + (1.0 - f0) * pow(1.0 - clamp(cosine,0.0,1.0), 5.0);
+}
+
+vec3 brdf(Material m, vec3 n, vec3 v, vec3 l, vec3 radiance) {
+  vec3 h = normalize(v + l);
+  float nv = max(dot(n,v), 0.001);
+  float nl = max(dot(n,l), 0.0);
+  float nh = max(dot(n,h), 0.0);
+  float vh = max(dot(v,h), 0.0);
+
+  float a = m.roughness * m.roughness;
+  float a2 = a * a;
+  float denom = nh * nh * (a2 - 1.0) + 1.0;
+  float distribution = a2 / max(PI * denom * denom, 0.00001);
+
+  float k = (m.roughness + 1.0);
+  k = k * k * 0.125;
+  float geometryV = nv / (nv * (1.0 - k) + k);
+  float geometryL = nl / (nl * (1.0 - k) + k);
+
+  vec3 f0 = mix(vec3(0.045), m.color, m.metal);
+  vec3 fresnel = fresnelSchlick(vh, f0);
+  vec3 specular = distribution * geometryV * geometryL * fresnel / max(4.0 * nv * nl, 0.001);
+  vec3 diffuse = (1.0 - fresnel) * (1.0 - m.metal) * m.color / PI;
+
+  return (diffuse + specular) * radiance * nl;
+}
+
+vec3 localLighting(vec3 p, vec3 n, vec3 rd, vec3 hit, Material m, bool secondary) {
+  vec3 v = -rd;
+  vec3 key = normalize(vec3(-0.55,0.8,0.42));
+  vec3 fill = normalize(vec3(0.75,0.35,-0.65));
+  vec3 rimLight = normalize(vec3(-0.6,0.35,-0.75));
+
+  float ao = secondary ? 0.86 : ambientOcclusion(p,n);
+  float shadow = secondary ? 1.0 : softShadow(p + n * 0.012, key);
+
+  vec3 color = brdf(m,n,v,key,vec3(5.8,4.7,3.6)) * shadow;
+  color += brdf(m,n,v,fill,vec3(0.35,1.7,2.4)) * ao;
+  color += brdf(m,n,v,rimLight,vec3(2.4,0.35,0.65)) * ao;
+  color += m.color * vec3(0.11,0.16,0.22) * ao * (1.0 - m.metal * 0.65);
+
+  float rim = pow(1.0 - max(dot(n,v),0.0), 3.5);
+  color += rim * vec3(0.015,0.095,0.13) * ao;
+
+  if (hit.y < -0.5) {
+    color += vec3(0.30,0.035,0.002) * exp(-dot(p.xz,p.xz) * 1.2);
+  }
+
+  return color + m.emission;
+}
+
+vec3 reflectionWeight(Material m, vec3 n, vec3 rd, float id) {
+  vec3 f0 = mix(vec3(0.045), m.color, m.metal);
+  if (id < -0.5) f0 = vec3(0.25);
+  return fresnelSchlick(max(dot(n,-rd),0.0), f0) * (1.0 - m.roughness * 0.3);
+}
+
+vec3 fogged(vec3 color, vec3 rd, float distanceValue) {
+  float density = 0.036;
+  float transmission = exp(-distanceValue * density);
+  vec3 fogColor = mix(vec3(0.025,0.044,0.060), sky(rd), 0.3);
+  return mix(fogColor, color, transmission);
+}
+
+// Un solo raggio riflesso. Alla seconda superficie resta solo l'ambiente.
+vec3 oneBounce(vec3 p, vec3 n, vec3 rd, Material m) {
+  vec3 reflectedDirection = reflect(rd,n);
+  vec3 origin = p + n * 0.016;
+  vec3 hit = traceScene(origin,reflectedDirection,true);
+  vec3 reflectedColor;
+
+  if (hit.y < -1.5) {
+    reflectedColor = environment(reflectedDirection,m.roughness);
+  } else {
+    vec3 point = origin + reflectedDirection * hit.x;
+    vec3 normal = hit.y < -0.5 ? vec3(0,1,0) : surfaceNormal(point);
+    Material other = materialAt(point,hit);
+    reflectedColor = localLighting(point,normal,reflectedDirection,hit,other,true);
+
+    vec3 weight = reflectionWeight(other,normal,reflectedDirection,hit.y);
+    reflectedColor += environment(reflect(reflectedDirection,normal),other.roughness) * weight * 0.65;
+    reflectedColor = fogged(reflectedColor,reflectedDirection,hit.x);
+  }
+
+  vec3 blurredEnvironment = environment(reflectedDirection,m.roughness);
+  return mix(reflectedColor, blurredEnvironment, m.roughness * m.roughness * 0.40);
+}
+
+vec3 particles(vec3 ro, vec3 rd, float sceneDistance) {
+  vec3 light = vec3(0.0);
+  for (int i = 0; i < 28; i++) {
+    vec3 delta = uSparks[i].xyz - ro;
+    float along = dot(delta,rd);
+
+    if (along > 0.0 && along < sceneDistance) {
+      vec3 perpendicular = delta - rd * along;
+      float distanceSquared = dot(perpendicular,perpendicular);
+      float radius = 0.011 + 0.008 * fract(float(i) * 0.381966);
+      float core = exp(-distanceSquared / (radius * radius));
+      float halo = exp(-distanceSquared / (radius * radius * 20.0));
+      float twinkle = uSparks[i].w;
+      vec3 tint = mix(vec3(1.0,0.25,0.045),vec3(0.08,0.65,1.0),step(0.63,fract(float(i)*0.618)));
+      light += tint * (core * 5.0 + halo * 0.085) * twinkle * exp(-along * 0.024);
+    }
+  }
+  return light;
+}
+
+vec3 filmic(vec3 color) {
+  return clamp((color * (2.51 * color + 0.03)) /
+    (color * (2.43 * color + 0.59) + 0.14), 0.0, 1.0);
+}
+
+void main() {
+  vec2 screen = (gl_FragCoord.xy - uResolution * 0.5) / uResolution.y;
+  float cs = cos(uRoll);
+  float sn = sin(uRoll);
+  screen = mat2(cs,-sn,sn,cs) * screen;
+
+  vec3 forward = normalize(uTarget - uEye);
+  vec3 right = normalize(cross(forward,vec3(0,1,0)));
+  vec3 up = cross(right,forward);
+
+  float lens = 1.30 * min(1.0, uResolution.x / uResolution.y);
+  vec3 rd = normalize(right * screen.x + up * screen.y + forward * lens);
+  vec3 hit = traceScene(uEye,rd,false);
+  vec3 color;
+
+  if (hit.y < -1.5) {
+    color = sky(rd);
+  } else {
+    vec3 p = uEye + rd * hit.x;
+    vec3 n = hit.y < -0.5 ? vec3(0,1,0) : surfaceNormal(p);
+    Material m = materialAt(p,hit);
+
+    color = localLighting(p,n,rd,hit,m,false);
+    vec3 weight = reflectionWeight(m,n,rd,hit.y);
+    color += oneBounce(p,n,rd,m) * weight;
+    color = fogged(color,rd,hit.x);
+  }
+
+  color += particles(uEye,rd,hit.x);
+
+  vec3 sourceDelta = uCenters[0] - uEye;
+  float closest = clamp(dot(sourceDelta,rd),0.0,hit.x);
+  vec3 sourceOffset = sourceDelta - rd * closest;
+  float halo = exp(-dot(sourceOffset,sourceOffset) * 1.25);
+  color += vec3(0.055,0.009,0.001) * halo * (0.8 + 0.2 * sin(uTime * 2.1));
+
+  float vignette = 1.0 - 0.34 * smoothstep(0.20,0.78,length(vUv - 0.5));
+  color = filmic(color * 1.10 * vignette);
+  color = pow(color,vec3(1.0 / 2.2));
+
+  float grain = hash12(gl_FragCoord.xy + fract(uTime) * 113.7) - 0.5;
+  color += grain / 255.0;
+
+  gl_FragColor = vec4(clamp(color,0.0,1.0),1.0);
+}
+`;
+
+function start() {
+  const canvas = document.getElementById('world');
+  let renderer;
+
+  try {
+    renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: false,
+      alpha: false,
+      depth: false,
+      stencil: false,
+      powerPreference: 'high-performance'
+    });
+  } catch {
+    document.getElementById('fallback').hidden = false;
+    return;
+  }
+
+  renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+  renderer.toneMapping = THREE.NoToneMapping;
+
+  const centers = Array.from({ length: 7 }, () => new THREE.Vector3());
+  const rotations = Array.from({ length: 6 }, () => new THREE.Matrix3());
+  const sparks = Array.from({ length: 28 }, () => new THREE.Vector4());
+  const rotationMatrix = new THREE.Matrix4();
+  const rotationEuler = new THREE.Euler();
+  const bufferSize = new THREE.Vector2();
+
+  const uniforms = {
+    uResolution: { value: new THREE.Vector2(1, 1) },
+    uTime: { value: 0 },
+    uBlend: { value: 0.35 },
+    uRadius: { value: 0.85 },
+    uRoll: { value: 0 },
+    uEye: { value: new THREE.Vector3() },
+    uTarget: { value: new THREE.Vector3() },
+    uCenters: { value: centers },
+    uRotations: { value: rotations },
+    uSparks: { value: sparks }
+  };
+
+  const material = new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader,
+    fragmentShader,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false
+  });
+
+  const scene = new THREE.Scene();
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+  quad.frustumCulled = false;
+  scene.add(quad);
+
+  const camera = new THREE.Camera();
+
+  const flight = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(6.4, 2.4, 6.5),
+    new THREE.Vector3(7.2, -0.30, 0.8),
+    new THREE.Vector3(4.8, 0.55, -5.6),
+    new THREE.Vector3(-0.2, 3.6, -7.2),
+    new THREE.Vector3(-5.1, 4.8, -4.0),
+    new THREE.Vector3(-7.3, 1.8, 1.0),
+    new THREE.Vector3(-4.6, -0.32, 6.0),
+    new THREE.Vector3(0.5, 1.15, 8.0)
+  ], true, 'centripetal');
+
+  flight.arcLengthDivisions = 600;
+  flight.updateArcLengths();
+
+  let quality = 1;
+  let smoothedFrameTime = 20;
+  let frames = 0;
+  let previousTime = 0;
+
+  function resize() {
+    const width = Math.max(1, window.innerWidth);
+    const height = Math.max(1, window.innerHeight);
+    const ratio = Math.min(
+      window.devicePixelRatio || 1,
+      1.5,
+      Math.sqrt(1050000 / (width * height))
+    ) * quality;
+
+    renderer.setPixelRatio(ratio);
+    renderer.setSize(width, height, false);
+    renderer.getDrawingBufferSize(bufferSize);
+    uniforms.uResolution.value.copy(bufferSize);
+  }
+
+  function setRotation(index, x, y, z) {
+    rotationEuler.set(x, y, z, 'XYZ');
+    rotationMatrix.makeRotationFromEuler(rotationEuler);
+    rotations[index].setFromMatrix4(rotationMatrix).transpose();
+  }
+
+  window.addEventListener('resize', resize, { passive: true });
+  resize();
+
+  const startTime = performance.now();
+
+  function animate(now) {
+    const t = (now - startTime) * 0.001;
+    uniforms.uTime.value = t;
+    uniforms.uBlend.value = 0.29 + 0.13 * (0.5 + 0.5 * Math.sin(t * 0.68));
+    uniforms.uRadius.value = 0.85 + 0.065 * Math.sin(t * 0.79);
+    uniforms.uRoll.value = 0.025 * Math.sin(t * 0.19);
+
+    const phase = (t / 57) % 1;
+    flight.getPointAt(phase, uniforms.uEye.value);
+    uniforms.uTarget.value.set(
+      0.12 * Math.sin(t * 0.17),
+      0.10 + 0.13 * Math.sin(t * 0.21),
+      0.10 * Math.cos(t * 0.15)
+    );
+
+    centers[0].set(0, -0.08 + 0.11 * Math.sin(t * 0.79), 0);
+
+    centers[1].set(
+      -1.24 + 0.30 * Math.sin(t * 0.61),
+      0.17 + 0.16 * Math.cos(t * 0.71),
+      -0.12 + 0.21 * Math.sin(t * 0.38)
+    );
+
+    centers[2].set(
+      1.13 + 0.26 * Math.sin(t * 0.57 + 2.1),
+      0.02 + 0.18 * Math.cos(t * 0.64),
+      -0.46 + 0.17 * Math.sin(t * 0.44)
+    );
+
+    centers[3].set(
+      -0.40 + 0.20 * Math.cos(t * 0.43),
+      0.70 + 0.19 * Math.sin(t * 0.62 + 1.0),
+      -0.92 + 0.20 * Math.cos(t * 0.52)
+    );
+
+    centers[4].set(
+      0.94 + 0.20 * Math.cos(t * 0.65),
+      -0.45 + 0.12 * Math.sin(t * 0.83),
+      0.97 + 0.20 * Math.sin(t * 0.56 + 0.7)
+    );
+
+    centers[5].set(
+      -0.94 + 0.24 * Math.sin(t * 0.56 + 0.8),
+      -0.32 + 0.18 * Math.sin(t * 0.74 + 2.4),
+      1.04 + 0.16 * Math.cos(t * 0.58)
+    );
+
+    centers[6].set(
+      0.43 + 0.41 * Math.sin(t * 0.58),
+      1.04 + 0.30 * Math.sin(t * 0.75 + 0.5),
+      0.37 + 0.40 * Math.cos(t * 0.58)
+    );
+
+    setRotation(0, 1.02 + 0.28 * Math.sin(t * 0.32), t * 0.20, 0.25 * Math.cos(t * 0.42));
+    setRotation(1, t * 0.19 + 0.25, t * 0.23 + 0.5, 0.19 * Math.sin(t * 0.47));
+    setRotation(2, 0.3 * Math.sin(t * 0.33), t * 0.16, -0.54 + 0.24 * Math.sin(t * 0.39));
+    setRotation(3, 0.25 + 0.17 * Math.sin(t * 0.37), t * 0.21, 0.25 * Math.sin(t * 0.43));
+    setRotation(4, t * 0.24, t * 0.28, 0.21 + t * 0.12);
+    setRotation(5, t * 0.035, t * 0.065, 0.12 * Math.sin(t * 0.18));
+
+    for (let i = 0; i < sparks.length; i++) {
+      const seed = (i * 0.61803398875) % 1;
+      const seed2 = (i * 0.41421356237 + 0.17) % 1;
+      const life = (seed + t * (0.034 + seed2 * 0.023)) % 1;
+      const angle = i * 2.3999632297 + t * (0.06 + seed2 * 0.025);
+      const radius = 1.65 + seed2 * 1.65;
+      const fade = Math.sin(Math.PI * life);
+      sparks[i].set(
+        Math.cos(angle) * radius + 0.14 * Math.sin(t + i),
+        -1.15 + life * 4.6,
+        Math.sin(angle) * radius,
+        fade * fade * (0.65 + 0.35 * Math.sin(t * 2.2 + i * 3.1))
+      );
+    }
+
+    renderer.render(scene, camera);
+
+    if (previousTime > 0) {
+      const delta = Math.min(now - previousTime, 100);
+      smoothedFrameTime += (delta - smoothedFrameTime) * 0.04;
+    }
+    previousTime = now;
+    frames++;
+
+    // Riduce il costo sui display grandi senza cambiare la scena.
+    if (frames % 120 === 0 && smoothedFrameTime > 31 && quality > 0.55) {
+      quality = Math.max(0.55, quality * 0.86);
+      resize();
+      smoothedFrameTime = 23;
+    }
+  }
+
+  animate(startTime);
+  renderer.setAnimationLoop(animate);
+}
+
+start();
+</script>
+</body>
+</html>
