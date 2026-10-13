@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#090c17">
+<title>Crucible · A liquid geometry study</title>
+<style>
+*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#090c17}canvas{display:block;width:100%;height:100%}#fallback{display:none;position:fixed;inset:0;place-items:center;color:#e4dcd0;font:16px Georgia,serif;text-align:center;padding:2rem}
+</style>
+</head>
+<body>
+<canvas id="scene" aria-label="Animated molten sculpture, six merging geometric forms and sparks above a reflective checkerboard"></canvas>
+<div id="fallback">This scene needs a browser with WebGL 2 enabled.</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+// Riferimenti: https://threejs.org/docs/pages/RawShaderMaterial.html
+// https://threejs.org/docs/pages/CatmullRomCurve3.html
+const vertexShader = `
+precision highp float;
+in vec3 position;
+void main(){gl_Position=vec4(position.xy,0.0,1.0);}
+`;
+const fragmentShader = `
+precision highp float;
+precision highp int;
+uniform vec2 uResolution;
+uniform float uTime;
+uniform float uFocal;
+uniform vec3 uEye;
+uniform vec3 uTarget;
+out vec4 fragColor;
+const float PI=3.14159265359;
+const float FAR=48.0;
+vec3 centers[6];
+mat2 spinA,spinB,spinC,spinD,spinE;
+float blendWidth;
+
+mat2 rotate2(float a){float c=cos(a),s=sin(a);return mat2(c,-s,s,c);}
+float hash12(vec2 p){vec3 q=fract(vec3(p.xyx)*0.1031);q+=dot(q,q.yzx+33.33);return fract((q.x+q.y)*q.z);}
+vec3 hash33(vec3 p){p=fract(p*vec3(0.1031,0.1030,0.0973));p+=dot(p,p.yxz+33.33);return fract((p.xxy+p.yxx)*p.zyx);}
+float noise3(vec3 p){
+ vec3 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+ return mix(mix(mix(hash33(i).x,hash33(i+vec3(1,0,0)).x,f.x),mix(hash33(i+vec3(0,1,0)).x,hash33(i+vec3(1,1,0)).x,f.x),f.y),mix(mix(hash33(i+vec3(0,0,1)).x,hash33(i+vec3(1,0,1)).x,f.x),mix(hash33(i+vec3(0,1,1)).x,hash33(i+vec3(1,1,1)).x,f.x),f.y),f.z);
+}
+float sphereSDF(vec3 p,float r){return length(p)-r;}
+float torusSDF(vec3 p,vec2 r){return length(vec2(length(p.xz)-r.x,p.y))-r.y;}
+float boxSDF(vec3 p,vec3 b,float radius){vec3 q=abs(p)-b;return length(max(q,0.0))+min(max(q.x,max(q.y,q.z)),0.0)-radius;}
+float capsuleSDF(vec3 p,vec3 a,vec3 b,float r){vec3 pa=p-a,ba=b-a;return length(pa-ba*clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0))-r;}
+float cylinderSDF(vec3 p,float r,float h){vec2 q=vec2(length(p.xz)-r,abs(p.y)-h);return min(max(q.x,q.y),0.0)+length(max(q,0.0));}
+float octahedronSDF(vec3 p,float s){
+ p=abs(p);float m=p.x+p.y+p.z-s;vec3 q;
+ if(3.0*p.x<m)q=p.xyz;
+ else if(3.0*p.y<m)q=p.yzx;
+ else if(3.0*p.z<m)q=p.zxy;
+ else return m*0.57735026919;
+ float k=clamp(0.5*(q.z-q.y+s),0.0,s);
+ return length(vec3(q.x,q.y-s+k,q.z-k));
+}
+// Distanza, tinta, peso della lava, metallo. Anche i materiali si fondono.
+vec4 smoothUnion(vec4 a,vec4 b,float k){
+ float h=clamp(0.5+0.5*(b.x-a.x)/k,0.0,1.0);
+ vec4 s=mix(b,a,h);s.x-=k*h*(1.0-h);return s;
+}
+void arrange(){
+ float t=uTime;
+ float gather=0.92+0.13*sin(t*0.48);
+ centers[0]=vec3(0.0,1.78+0.16*sin(t*0.8),0.0);
+ centers[1]=vec3(-1.91*gather,1.98+0.24*sin(t*0.61+0.8),0.08);
+ centers[2]=vec3(1.97*gather,1.29+0.22*sin(t*0.7+2.1),-0.22);
+ centers[3]=vec3(-1.33*gather,1.18+0.16*sin(t*0.9+1.0),1.75*gather);
+ centers[4]=vec3(1.33*gather,0.94+0.18*sin(t*0.67+3.0),1.77*gather);
+ centers[5]=vec3(0.25+0.28*sin(t*0.38),2.77+0.22*sin(t*0.73),-1.72*gather);
+ spinA=rotate2(0.65+t*0.28);spinB=rotate2(t*0.22);
+ spinC=rotate2(-0.38+0.34*sin(t*0.55));
+ spinD=rotate2(0.16+0.22*sin(t*0.44));spinE=rotate2(t*0.31);
+ blendWidth=0.32+0.22*(0.5+0.5*sin(t*0.67));
+}
+vec4 mapScene(vec3 p){
+ vec3 q=p-centers[0];
+ vec4 s=vec4(sphereSDF(q,1.06+0.06*sin(uTime*1.1)),1.0,1.0,0.08);
+ q=p-centers[1];q.yz=spinA*q.yz;q.xy=spinB*q.xy;
+ s=smoothUnion(s,vec4(torusSDF(q,vec2(0.79,0.235)),2.0,0.0,0.92),blendWidth);
+ q=p-centers[2];q.xz=spinB*q.xz;q.xy=spinD*q.xy;
+ float rounding=0.11+0.10*(0.5+0.5*sin(uTime*0.8));
+ s=smoothUnion(s,vec4(boxSDF(q,vec3(0.59),rounding),3.0,0.0,0.85),blendWidth);
+ q=p-centers[3];q.xy=spinC*q.xy;q.xz=spinB*q.xz;
+ s=smoothUnion(s,vec4(capsuleSDF(q,vec3(0,-0.57,0),vec3(0,0.57,0),0.34),4.0,0.0,0.8),blendWidth);
+ q=p-centers[4];q.yz=spinD*q.yz;
+ s=smoothUnion(s,vec4(cylinderSDF(q,0.54,0.57)-0.055,5.0,0.0,0.86),blendWidth);
+ q=p-centers[5];q.xz=spinE*q.xz;q.yz=spinD*q.yz;
+ s=smoothUnion(s,vec4(octahedronSDF(q,1.08)-0.055,6.0,0.0,0.93),blendWidth);
+ // Due satelliti tirano filamenti fuori dal nucleo.
+ vec3 moon=centers[0]+vec3(1.25*cos(uTime*0.6),0.67*sin(uTime*0.8),1.25*sin(uTime*0.6));
+ s=smoothUnion(s,vec4(sphereSDF(p-moon,0.29),2.0,0.0,0.9),0.42);
+ moon=centers[0]+vec3(0.95*cos(-uTime*0.45+2.4),0.87,0.95*sin(-uTime*0.45+2.4));
+ s=smoothUnion(s,vec4(sphereSDF(p-moon,0.21),4.0,0.0,0.82),0.35);
+ vec4 floorSample=vec4(p.y,0.0,0.0,0.4);
+ return p.y<s.x?floorSample:s;
+}
+struct Hit{float t;float found;};
+Hit march(vec3 ro,vec3 rd,float limit,int budget){
+ float t=0.025;float found=0.0;
+ for(int i=0;i<96;i++){
+  if(i>=budget||t>limit)break;
+  float d=mapScene(ro+rd*t).x;
+  if(abs(d)<0.0008+0.0004*t){found=1.0;break;}
+  t+=max(d*0.86,0.0003);
+ }
+ return Hit(t,found);
+}
+vec3 normalAt(vec3 p,float t){
+ float e=max(0.001,0.00025*t);vec2 k=vec2(1.0,-1.0);
+ return normalize(k.xyy*mapScene(p+k.xyy*e).x+k.yyx*mapScene(p+k.yyx*e).x+k.yxy*mapScene(p+k.yxy*e).x+k.xxx*mapScene(p+k.xxx*e).x);
+}
+float softShadow(vec3 p,vec3 light,float offset){
+ vec3 v=light-p;float end=length(v);vec3 rd=v/end;
+ float shade=1.0,t=offset;
+ for(int i=0;i<28;i++){
+  if(t>=end)break;
+  float d=mapScene(p+rd*t).x;
+  if(d<0.001)return 0.06;
+  shade=min(shade,12.0*d/t);
+  t+=clamp(d,0.025,0.65);
+ }
+ return clamp(shade,0.06,1.0);
+}
+float ambientOcclusion(vec3 p,vec3 n){
+ float occlusion=0.0,weight=1.0;
+ for(int i=0;i<5;i++){
+  float h=0.04+0.115*float(i);
+  occlusion+=max(h-mapScene(p+n*h).x,0.0)*weight;
+  weight*=0.67;
+ }
+ return clamp(1.0-2.1*occlusion,0.12,1.0);
+}
+vec3 sky(vec3 rd){
+ float horizon=exp(-abs(rd.y)*6.0);
+ vec3 col=mix(vec3(0.012,0.017,0.039),vec3(0.065,0.044,0.093),pow(max(rd.y,0.0),0.55));
+ col+=vec3(0.045,0.095,0.12)*horizon;
+ float band=exp(-pow((rd.y-0.24+0.1*sin(atan(rd.z,rd.x)*2.0))*9.0,2.0));
+ col+=vec3(0.02,0.014,0.04)*band*(0.4+noise3(rd*12.0));
+ vec2 st=vec2(atan(rd.z,rd.x),asin(clamp(rd.y,-1.0,1.0)))*112.0;
+ vec2 cell=floor(st);vec2 f=fract(st)-0.5;float seed=hash12(cell);
+ float star=exp(-dot(f,f)*(420.0+seed*400.0))*step(0.982,seed);
+ col+=star*vec3(0.7,0.82,1.0)*(0.6+0.4*sin(uTime*0.8+seed*70.0))*smoothstep(-0.02,0.15,rd.y);
+ col+=vec3(0.24,0.33,0.42)*pow(max(dot(rd,normalize(vec3(-0.6,0.8,-0.7))),0.0),180.0);
+ return col;
+}
+vec3 metalColor(float id){
+ vec3 col=vec3(0.32,0.46,0.54);
+ col=mix(col,vec3(0.045,0.57,0.68),smoothstep(1.0,2.0,id));
+ col=mix(col,vec3(0.53,0.18,0.43),smoothstep(2.0,3.0,id));
+ col=mix(col,vec3(0.70,0.47,0.21),smoothstep(3.0,4.0,id));
+ col=mix(col,vec3(0.12,0.53,0.37),smoothstep(4.0,5.0,id));
+ return mix(col,vec3(0.51,0.61,0.75),smoothstep(5.0,6.0,id));
+}
+float lavaCracks(vec3 p){
+ vec3 i=floor(p),f=fract(p);float near1=10.0,near2=10.0;
+ for(int z=-1;z<=1;z++)for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){
+  vec3 b=vec3(float(x),float(y),float(z));
+  vec3 v=b+hash33(i+b)-f;float d=dot(v,v);
+  if(d<near1){near2=near1;near1=d;}else near2=min(near2,d);
+ }
+ return 1.0-smoothstep(0.025,0.115,near2-near1);
+}
+vec3 fresnel(float cosTheta,vec3 f0){
+ return f0+(1.0-f0)*pow(1.0-clamp(cosTheta,0.0,1.0),5.0);
+}
+vec3 brdf(vec3 n,vec3 v,vec3 l,vec3 base,vec3 f0,float metal,float rough){
+ vec3 h=normalize(v+l);
+ float nl=max(dot(n,l),0.0),nv=max(dot(n,v),0.001),nh=max(dot(n,h),0.0);
+ float a=rough*rough,a2=a*a;
+ float denominator=nh*nh*(a2-1.0)+1.0;
+ float distribution=a2/max(PI*denominator*denominator,0.00001);
+ float k=(rough+1.0)*(rough+1.0)*0.125;
+ float geometry=(nv/(nv*(1.0-k)+k))*(nl/(nl*(1.0-k)+k));
+ vec3 f=fresnel(max(dot(v,h),0.0),f0);
+ vec3 spec=distribution*geometry*f/max(4.0*nv*nl,0.001);
+ return ((1.0-f)*(1.0-metal)*base/PI+spec)*nl;
+}
+vec3 shade(vec3 p,vec3 n,vec3 rd,vec4 material,float travel,bool secondary,out vec3 reflectance){
+ vec3 base=metalColor(material.y),emission=vec3(0.0);
+ float rough=0.245,metal=material.w;
+ bool floorHit=material.y<0.5;
+ if(floorHit){
+  float footprint=clamp(0.0025*travel,0.01,0.45);
+  vec2 s=sin(PI*p.xz);
+  vec2 checker=smoothstep(vec2(-footprint),vec2(footprint),s)*2.0-1.0;
+  float tile=0.5+0.5*checker.x*checker.y;
+  base=mix(vec3(0.022,0.031,0.044),vec3(0.20,0.235,0.275),tile);
+  rough=0.22;metal=0.32;
+ }else if(material.z>0.001){
+  vec3 q=p-centers[0];q.xz=rotate2(uTime*0.13)*q.xz;
+  float cracks=lavaCracks(q*3.5);
+  float stone=noise3(q*18.0)*0.55+noise3(q*43.0)*0.25;
+  vec3 rock=vec3(0.055,0.027,0.022)*(0.55+stone);
+  base=mix(base,rock,material.z);
+  rough=mix(rough,0.6+0.14*stone,material.z);
+  float pulse=0.68+0.32*sin(uTime*2.25+q.y*2.8+noise3(q*2.0)*3.0);
+  emission=material.z*cracks*mix(vec3(2.8,0.075,0.005),vec3(7.0,1.0,0.045),pulse);
+ }
+ vec3 f0=floorHit?vec3(0.25):mix(vec3(0.04),base,metal);
+ float nv=max(dot(n,-rd),0.0);
+ reflectance=fresnel(nv,f0);
+ float ao=secondary?1.0:ambientOcclusion(p,n);
+ vec3 key=vec3(-3.8,7.5,4.8),fill=vec3(4.7,5.0,-4.5);
+ vec3 lk=key-p,lf=fill-p;
+ float offset=max(0.009,(0.0008+0.0004*travel)*4.0);
+ float shadow=secondary?1.0:softShadow(p+n*offset,key,offset);
+ vec3 col=base*(vec3(0.06,0.085,0.12)+vec3(0.08,0.07,0.105)*max(n.y,0.0))*ao;
+ col+=brdf(n,-rd,normalize(lk),base,f0,metal,rough)*vec3(5.3,3.8,2.8)*shadow/(1.0+dot(lk,lk)*0.016);
+ col+=brdf(n,-rd,normalize(lf),base,f0,metal,rough)*vec3(1.0,2.1,3.0)/(1.0+dot(lf,lf)*0.026);
+ vec3 toCore=centers[0]-p;float coreDist=dot(toCore,toCore);
+ col+=base*vec3(2.8,0.23,0.028)*max(dot(n,normalize(toCore)),0.0)/(1.0+coreDist*1.8);
+ if(!floorHit)col+=pow(1.0-nv,3.0)*(metalColor(material.y)*0.22+material.z*vec3(0.35,0.025,0.005))*ao;
+ return col+emission;
+}
+vec3 applyFog(vec3 col,vec3 rd,float distance){
+ return mix(col,sky(rd),1.0-exp(-distance*0.032));
+}
+vec3 sparks(vec3 ro,vec3 rd,float nearest){
+ vec3 col=vec3(0.0);
+ for(int i=0;i<34;i++){
+  float fi=float(i);vec3 seed=hash33(vec3(fi,fi*1.73,fi*3.19));
+  float a=seed.x*2.0*PI+uTime*(0.06+seed.z*0.065);
+  float radius=1.1+seed.y*2.6;
+  vec3 pos=vec3(cos(a)*radius,0.22+fract(seed.z+uTime*(0.035+seed.x*0.025))*5.0,sin(a)*radius);
+  float t=dot(pos-ro,rd);
+  if(t>0.0&&t<nearest){
+   vec3 delta=ro+rd*t-pos;
+   float size=0.014+seed.y*0.017+t*0.00065;
+   float d=dot(delta,delta);
+   float core=exp(-d/(size*size));
+   float halo=exp(-d/(size*size*13.0))*0.055;
+   vec3 color=mix(vec3(3.6,0.55,0.07),vec3(0.18,1.9,2.6),step(0.76,seed.x));
+   col+=(core+halo)*color*(0.6+0.4*sin(uTime*2.0+fi))*exp(-t*0.035);
+  }
+ }
+ return col;
+}
+vec3 filmic(vec3 x){
+ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0,1.0);
+}
+void main(){
+ arrange();
+ vec2 uv=(2.0*gl_FragCoord.xy-uResolution)/uResolution.y;
+ vec3 forward=normalize(uTarget-uEye);
+ vec3 right=normalize(cross(forward,vec3(0,1,0)));
+ vec3 up=cross(right,forward);
+ float bank=0.025*sin(uTime*0.22);uv=rotate2(bank)*uv;
+ vec3 rd=normalize(right*uv.x+up*uv.y+forward*uFocal);
+ Hit hit=march(uEye,rd,FAR,96);
+ vec3 col=sky(rd);float depth=FAR;
+ if(hit.found>0.5){
+  depth=hit.t;vec3 p=uEye+rd*hit.t;
+  vec3 n=normalAt(p,hit.t);vec4 material=mapScene(p);
+  vec3 reflectance;
+  col=shade(p,n,rd,material,hit.t,false,reflectance);
+  // Un solo rimbalzo: il secondo punto riceve luce senza altre riflessioni.
+  vec3 reflected=reflect(rd,n);
+  float offset=max(0.009,(0.0008+0.0004*hit.t)*4.0);
+  vec3 origin=p+n*offset;
+  Hit bounce=march(origin,reflected,32.0,64);
+  vec3 reflectionColor=sky(reflected);
+  if(bounce.found>0.5){
+   vec3 bp=origin+reflected*bounce.t;
+   vec3 bn=normalAt(bp,bounce.t);vec3 unusedReflectance;
+   reflectionColor=shade(bp,bn,reflected,mapScene(bp),bounce.t,true,unusedReflectance);
+   reflectionColor=applyFog(reflectionColor,reflected,bounce.t);
+  }
+  float reflectionAO=material.y<0.5?1.0:ambientOcclusion(p,n);
+  col+=reflectionColor*reflectance*reflectionAO;
+  col=applyFog(col,rd,hit.t);
+ }
+ col+=sparks(uEye,rd,depth);
+ float glowT=max(dot(centers[0]-uEye,rd),0.0);
+ vec3 delta=uEye+rd*glowT-centers[0];
+ col+=vec3(0.13,0.017,0.003)*exp(-dot(delta,delta)*1.3)*(0.8+0.2*sin(uTime*2.25));
+ vec2 screen=gl_FragCoord.xy/uResolution;
+ float vignette=pow(max(16.0*screen.x*screen.y*(1.0-screen.x)*(1.0-screen.y),0.0),0.18);
+ col*=mix(0.63,1.0,vignette);
+ col=pow(filmic(max(col,0.0)*1.15),vec3(1.0/2.2));
+ col+=(hash12(gl_FragCoord.xy+fract(uTime)*173.0)-0.5)/255.0;
+ fragColor=vec4(clamp(col,0.0,1.0),1.0);
+}
+`;
+const canvas=document.getElementById('scene');
+let renderer;
+try{
+ renderer=new THREE.WebGLRenderer({canvas,antialias:false,alpha:false,powerPreference:'high-performance'});
+}catch(error){
+ canvas.style.display='none';
+ document.getElementById('fallback').style.display='grid';
+}
+if(renderer){
+ renderer.outputColorSpace=THREE.LinearSRGBColorSpace;
+ renderer.toneMapping=THREE.NoToneMapping;
+ const uniforms={
+  uResolution:{value:new THREE.Vector2()},
+  uTime:{value:0},
+  uFocal:{value:1.85},
+  uEye:{value:new THREE.Vector3()},
+  uTarget:{value:new THREE.Vector3(0,1.55,0)}
+ };
+ const material=new THREE.RawShaderMaterial({
+  glslVersion:THREE.GLSL3,
+  vertexShader,
+  fragmentShader,
+  uniforms,
+  depthTest:false,
+  depthWrite:false,
+  toneMapped:false
+ });
+ const scene=new THREE.Scene();
+ const quad=new THREE.Mesh(new THREE.PlaneGeometry(2,2),material);
+ quad.frustumCulled=false;
+ scene.add(quad);
+ const camera=new THREE.Camera();
+ const flight=new THREE.CatmullRomCurve3([
+  new THREE.Vector3(6.7,3.8,7.8),
+  new THREE.Vector3(0.5,5.6,9.7),
+  new THREE.Vector3(-6.8,4.0,7.3),
+  new THREE.Vector3(-9.0,2.5,0.1),
+  new THREE.Vector3(-5.8,1.9,-7.0),
+  new THREE.Vector3(1.0,3.5,-9.5),
+  new THREE.Vector3(7.0,6.9,-5.8),
+  new THREE.Vector3(9.3,4.7,1.7)
+ ],true,'centripetal');
+ flight.arcLengthDivisions=400;
+ function resize(){
+  const w=window.innerWidth,h=window.innerHeight;
+  const ratio=Math.min(window.devicePixelRatio||1,1.5,Math.sqrt(1000000/(w*h)));
+  renderer.setPixelRatio(ratio);
+  renderer.setSize(w,h,false);
+  renderer.getDrawingBufferSize(uniforms.uResolution.value);
+  uniforms.uFocal.value=1.85*Math.min(1,w/h*0.95);
+ }
+ window.addEventListener('resize',resize,{passive:true});
+ resize();
+ const start=performance.now();
+ renderer.setAnimationLoop(now=>{
+  const t=(now-start)*0.001;
+  uniforms.uTime.value=t;
+  flight.getPointAt((t/52)%1,uniforms.uEye.value);
+  uniforms.uTarget.value.set(
+   0.12*Math.sin(t*0.18),
+   1.52+0.15*Math.sin(t*0.24),
+   0.06*Math.cos(t*0.2)
+  );
+  renderer.render(scene,camera);
+ });
+}
+</script>
+</body>
+</html>

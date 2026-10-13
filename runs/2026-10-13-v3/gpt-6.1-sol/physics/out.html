@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The Unnecessary Machine</title>
+<link rel="icon" href="data:,">
+<style>
+:root{color-scheme:dark;--ink:#e9f2f5;--muted:#91a6b5;--live:#66e3d4;--gold:#ffd074}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101e30}body{font-family:Trebuchet MS,Arial,sans-serif;color:var(--ink)}canvas#world{display:block;position:fixed;inset:0;width:100%;height:100%}.hud{position:fixed;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(7,16,27,.68),transparent 23%,transparent 69%,rgba(7,16,27,.9))}header{position:absolute;left:32px;right:32px;top:25px;display:flex;justify-content:space-between;align-items:flex-start}h1{font-size:clamp(21px,2.5vw,34px);letter-spacing:-1.2px;line-height:1.1;margin:0 0 7px;font-weight:700}header p{font-size:12px;margin:0;color:var(--muted)}.clock{display:flex;gap:12px;align-items:center}.dial{width:47px;height:47px;transform:rotate(-90deg)}.dial circle{fill:none;stroke-width:2}.dial .track{stroke:#3b4d5d}.dial .hand{stroke:var(--live);stroke-dasharray:126;stroke-dashoffset:126}.readout{text-align:right;font-size:12px;color:var(--muted)}.readout b{font-size:21px;display:block;color:var(--ink);font-variant-numeric:tabular-nums;margin-bottom:3px}.caption{position:absolute;left:32px;bottom:128px}.caption .sequence{font-size:12px;color:var(--live);margin-bottom:7px}.caption strong{font-size:clamp(19px,2.2vw,28px);font-weight:500;letter-spacing:-.6px;display:block}.caption small{font-size:12px;display:block;color:var(--muted);margin-top:7px}.timeline{position:absolute;bottom:36px;left:32px;right:32px;display:flex;max-width:1080px;margin:auto;gap:0}.step{position:relative;flex:1;display:flex;gap:9px;align-items:center;color:#8395a5;padding-top:15px;border-top:2px solid #354453;transition:color .2s,border-color .2s}.step i{font-style:normal;width:29px;height:29px;border:1px solid #536270;border-radius:50%;display:grid;place-items:center;font-size:12px;transition:all .2s}.step span{font-size:12px}.step.done{border-color:#4c9e98;color:#b5cfcf}.step.done i{border-color:#66e3d4;color:#66e3d4}.step.active{border-color:var(--live);color:white}.step.active i{background:var(--live);color:#152536;border-color:var(--live);box-shadow:0 0 24px #66e3d448}.step:last-child.active{border-color:var(--gold)}.step:last-child.active i{background:var(--gold);border-color:var(--gold);box-shadow:0 0 30px #ffd07466}.reset{position:absolute;inset:0;background:#101e30;opacity:0;pointer-events:none}.finish{position:absolute;top:24%;width:100%;text-align:center;color:var(--gold);font-size:clamp(24px,4vw,50px);font-weight:bold;letter-spacing:-1.5px;opacity:0;transform:translateY(8px);transition:opacity .12s,transform .2s}.finish.on{opacity:1;transform:translateY(0)}
+@media(max-width:700px){header{left:18px;right:18px;top:20px}header p{font-size:10px;max-width:220px;line-height:1.5}.dial{width:36px;height:36px}.clock{gap:7px}.readout b{font-size:17px}.readout{font-size:10px}.caption{left:18px;bottom:117px;max-width:80%}.caption small{font-size:10px}.timeline{left:18px;right:18px;bottom:25px}.step{display:block;text-align:center;padding-top:12px}.step i{margin:auto auto 8px;width:26px;height:26px}.step span{font-size:9px}}
+</style>
+</head>
+<body>
+<canvas id="world" aria-label="An automatically looping three-dimensional chain reaction with branching dominoes, a spiral funnel, a seesaw, a pendulum, collapsing blocks, a pulley and an illuminated flag."></canvas>
+<div class="hud">
+<header><div><h1>The Unnecessary Machine</h1><p>Two paths. Seven consequences. Absolutely no shortcuts.</p></div><div class="clock"><div class="readout"><b id="time">00.0 / 15</b><span id="loop">Loop 001</span></div><svg class="dial" viewBox="0 0 48 48" aria-hidden="true"><circle class="track" cx="24" cy="24" r="20"/><circle id="hand" class="hand" cx="24" cy="24" r="20"/></svg></div></header>
+<div class="caption"><div class="sequence" id="sequence">01 / Domino circuit</div><strong id="caption">One push. Two ways down.</strong><small id="detail">35 hinged dominoes split, then reunite at a locked bridge.</small></div>
+<div class="timeline" aria-label="Chain reaction stages"><div class="step"><i>1</i><span>Dominoes</span></div><div class="step"><i>2</i><span>Funnel</span></div><div class="step"><i>3</i><span>Seesaw</span></div><div class="step"><i>4</i><span>Pendulum</span></div><div class="step"><i>5</i><span>Collapse</span></div><div class="step"><i>6</i><span>Pulley</span></div><div class="step"><i>7</i><span>Finale</span></div></div>
+<div class="finish" id="finish">A very roundabout success.</div><div class="reset" id="reset"></div>
+</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const TAU=Math.PI*2,LOOP=15,clamp=THREE.MathUtils.clamp;
+const smooth=(a,b,t)=>{let u=clamp((t-a)/(b-a),0,1);return u*u*(3-2*u)};
+const V=(x,y,z=0)=>new THREE.Vector3(x,y,z);
+const renderer=new THREE.WebGLRenderer({canvas:document.getElementById('world'),antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.2;
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color('#101e30');
+scene.fog=new THREE.Fog('#101e30',38,85);
+const camera=new THREE.PerspectiveCamera(44,innerWidth/innerHeight,.1,120);
+scene.add(new THREE.HemisphereLight(0xc7e7ff,0x58616c,2.1));
+const key=new THREE.DirectionalLight(0xffead1,3.5);
+key.position.set(-8,22,12);
+key.castShadow=true;
+key.shadow.mapSize.set(2048,2048);
+Object.assign(key.shadow.camera,{left:-23,right:23,top:14,bottom:-14,near:1,far:55});
+key.shadow.bias=-.0006;
+key.shadow.normalBias=.035;
+scene.add(key);
+const rim=new THREE.DirectionalLight(0x76d8ef,2.3);
+rim.position.set(9,12,-12);
+scene.add(rim);
+
+const envCanvas=document.createElement('canvas');
+envCanvas.width=512;envCanvas.height=256;
+const ec=envCanvas.getContext('2d');
+const eg=ec.createLinearGradient(0,0,0,256);
+eg.addColorStop(0,'#778d9e');
+eg.addColorStop(.5,'#344859');
+eg.addColorStop(1,'#182534');
+ec.fillStyle=eg;ec.fillRect(0,0,512,256);
+ec.fillStyle='#fff3d5';ec.fillRect(30,25,75,95);
+ec.fillStyle='#cfedff';ec.fillRect(280,45,140,65);
+const envTexture=new THREE.CanvasTexture(envCanvas);
+envTexture.mapping=THREE.EquirectangularReflectionMapping;
+envTexture.colorSpace=THREE.SRGBColorSpace;
+const pmrem=new THREE.PMREMGenerator(renderer);
+const environment=pmrem.fromEquirectangular(envTexture);
+scene.environment=environment.texture;
+envTexture.dispose();pmrem.dispose();
+
+const mat=(c,metal=0,rough=.45)=>new THREE.MeshStandardMaterial({color:c,metalness:metal,roughness:rough});
+const navy=mat('#263d51',.55),dark=mat('#172c3d',.4),brass=mat('#d8ab61',.75,.27),cream=mat('#e9eee8',.18,.28),teal=mat('#4ed9c8',.35,.28),coral=mat('#f27960',.3,.32),black=mat('#193347',.2),steel=mat('#a7bfcb',.85,.2);
+const unitBox=new THREE.BoxGeometry(1,1,1),sphereGeo=new THREE.SphereGeometry(1,24,16);
+function mesh(geo,material,parent=scene){
+ let m=new THREE.Mesh(geo,material);
+ m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;
+}
+function box(w,h,d,x,y,z,material=navy,parent=scene){
+ let m=mesh(unitBox,material,parent);
+ m.scale.set(w,h,d);m.position.set(x,y,z);return m;
+}
+function sphere(r,x,y,z,material,parent=scene){
+ let m=mesh(sphereGeo,material,parent);
+ m.scale.setScalar(r);m.position.set(x,y,z);return m;
+}
+function rod(a,b,r=.06,material=brass,parent=scene){
+ let m=mesh(new THREE.CylinderGeometry(r,r,1,10),material,parent);
+ m.position.copy(a).add(b).multiplyScalar(.5);
+ m.scale.y=a.distanceTo(b);
+ m.quaternion.setFromUnitVectors(V(0,1),b.clone().sub(a).normalize());return m;
+}
+function ring(r,x,y,z,material=brass,parent=scene,tube=.045){
+ let m=mesh(new THREE.TorusGeometry(r,tube,8,64),material,parent);
+ m.rotation.x=Math.PI/2;m.position.set(x,y,z);return m;
+}
+function rail(points,r=.035,material=brass,parent=scene){
+ return mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points),Math.max(24,points.length*3),r,7,false),material,parent);
+}
+function bolt(x,y,z,parent=scene){
+ let b=mesh(new THREE.CylinderGeometry(.07,.07,.035,8),steel,parent);
+ b.position.set(x,y,z);return b;
+}
+function labelTexture(text,w=512,h=128){
+ let c=document.createElement('canvas');c.width=w;c.height=h;
+ let ctx=c.getContext('2d');
+ ctx.fillStyle='#192f43';ctx.fillRect(0,0,w,h);
+ ctx.strokeStyle='#b89660';ctx.lineWidth=5;ctx.strokeRect(5,5,w-10,h-10);
+ ctx.font=`bold ${h*.4}px Trebuchet MS, sans-serif`;
+ ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#dce6e7';
+ ctx.fillText(text,w/2,h/2);
+ let tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;return tex;
+}
+function plaque(text,x,y,z,w=2.4){
+ let m=mesh(new THREE.PlaneGeometry(w,.58),new THREE.MeshBasicMaterial({map:labelTexture(text)}));
+ m.rotation.x=-Math.PI/2;m.position.set(x,y,z);return m;
+}
+
+box(35,.5,11,1,0,0,dark);
+box(34.7,.08,10.7,1,.29,0,navy);
+for(let x=-16;x<=18;x+=2){
+ box(.018,.012,10.3,x,.338,0,black);
+ for(let z of [-5.1,5.1])bolt(x,.355,z);
+}
+for(let z of [-5.45,5.45])box(35,.1,.08,1,.3,z,brass);
+const floor=mesh(new THREE.PlaneGeometry(180,180),mat('#15263a',.15,.65));
+floor.rotation.x=-Math.PI/2;floor.position.y=-.28;
+plaque('THE UNNECESSARY MACHINE',-5,.345,4.4,7);
+
+const DECK=4.7,H=1.12;
+box(12.25,.22,4.7,-9.1,DECK-.14,0,navy);
+for(let x of [-14.5,-10,-5])for(let z of [-1.95,1.95]){
+ rod(V(x,.34,z),V(x,DECK-.23,z),.095,brass);
+ box(.48,.12,.48,x,.4,z,dark);
+}
+for(let z of [-2.35,2.35])box(12.25,.07,.07,-9.1,DECK,z,brass);
+plaque('SPLIT  /  REJOIN',-9.5,DECK+.008,1.94,3.4);
+
+const doms=[],pipGeo=new THREE.CircleGeometry(.037,10);
+function domino(x,z,color,width=.5,speed=1){
+ let group=new THREE.Group();
+ group.position.set(x,DECK,z);scene.add(group);
+ let pivot=new THREE.Group();group.add(pivot);
+ let material=color.clone();
+ box(.16,H,width,0,H/2,0,material,pivot);
+ box(.165,.023,width*.84,0,H*.51,0,brass,pivot);
+ for(let j=0;j<5;j++){
+  let p=mesh(pipGeo,black,pivot);p.castShadow=false;
+  p.rotation.y=Math.PI/2;
+  p.position.set(.081,j<2?H*.74:H*.26,(j<2?j-.5:j-3)*.12);
+ }
+ let d={group,pivot,x,z,speed,start:0,angle:0,next:[],material};
+ doms.push(d);return d;
+}
+const trunk=[];
+for(let i=0;i<16;i++){
+ let u=i/15;
+ trunk.push(domino(-14+6*u,1.15*Math.sin(TAU*u),i%4===0?teal:cream,i===15?1.4:.5));
+}
+const arms=[[],[]];
+for(let side=0;side<2;side++)for(let i=1;i<=8;i++){
+ let u=i/9;
+ arms[side].push(domino(-8+3.15*i/8,(side?1:-1)*1.2*Math.sin(Math.PI*u),side?coral:teal,.48,side?.965:1));
+}
+const bridge=domino(-4.2,0,brass,1.55);
+const out1=domino(-3.60,0,cream),lastDom=domino(-3.03,0,teal);
+function connect(a,b){a.next.push(b)}
+for(let i=0;i<trunk.length-1;i++)connect(trunk[i],trunk[i+1]);
+for(let a of arms){
+ connect(trunk.at(-1),a[0]);
+ for(let i=0;i<a.length-1;i++)connect(a[i],a[i+1]);
+ connect(a.at(-1),bridge);
+}
+connect(bridge,out1);connect(out1,lastDom);
+for(let d of doms){
+ let target=d.next[0];
+ if(target){
+  let dz=target.z-d.z,dx=target.x-d.x;
+  if(d===trunk.at(-1))dz=0;
+  d.group.rotation.y=-Math.atan2(dz,dx);
+ }
+}
+const delay=(theta,speed=1)=>(Math.sqrt(.8*.8+48*theta)-.8)/24/speed;
+function contact(a,b){
+ let dist=a===trunk.at(-1)?b.x-a.x:Math.hypot(b.x-a.x,b.z-a.z);
+ return delay(Math.asin(clamp((dist-.09)/H,.1,.95)),a.speed);
+}
+trunk[0].start=.2;
+for(let i=1;i<trunk.length;i++)trunk[i].start=trunk[i-1].start+contact(trunk[i-1],trunk[i]);
+for(let a of arms){
+ a[0].start=trunk.at(-1).start+contact(trunk.at(-1),a[0]);
+ for(let i=1;i<a.length;i++)a[i].start=a[i-1].start+contact(a[i-1],a[i]);
+}
+let armHits=arms.map(a=>a.at(-1).start+contact(a.at(-1),bridge));
+bridge.start=Math.max(...armHits);
+out1.start=bridge.start+contact(bridge,out1);
+lastDom.start=out1.start+contact(out1,lastDom);
+const MARBLE=4.55,scaleTime=(MARBLE-.2)/(lastDom.start+delay(1.08)-.2);
+for(let d of doms)d.start=.2+(d.start-.2)*scaleTime;
+armHits=armHits.map(t=>.2+(t-.2)*scaleTime);
+const latches=[];
+for(let i=0;i<2;i++){
+ let g=new THREE.Group();
+ g.position.set(-4.15,DECK+.015,i?.58:-.58);scene.add(g);
+ box(.66,.075,.12,-.18,0,0,i?coral:teal,g);
+ bolt(0,.05,0,g);latches.push(g);
+}
+const finger=new THREE.Group();
+finger.position.set(-14.55,DECK+.25,0);scene.add(finger);
+box(.75,.14,.17,-.15,0,0,brass,finger);
+sphere(.16,-.45,0,0,brass,finger);
+
+const FX=0,FY=2,profile=[];
+for(let i=0;i<=28;i++){
+ let u=i/28;
+ profile.push(new THREE.Vector2(.26+1.78*u,3.05*u));
+}
+const glass=new THREE.MeshPhysicalMaterial({color:'#85cfda',metalness:.15,roughness:.2,transparent:true,opacity:.16,side:THREE.DoubleSide,depthWrite:false});
+const funnel=mesh(new THREE.LatheGeometry(profile,80),glass);
+funnel.position.set(FX,FY,0);funnel.castShadow=false;
+for(let j=0;j<4;j++){
+ let a=TAU*j/4+Math.PI/4,x=Math.cos(a)*2.25,z=Math.sin(a)*2.25;
+ rod(V(x,.34,z),V(x,5.05,z),.055,brass);
+ sphere(.10,x,5.05,z,brass);
+}
+for(let u of [0,.32,.65,1])ring(.26+1.78*u,FX,FY+3.05*u,0,brass,scene,.037);
+function spiral(u,offset=0){
+ let r=2.04-1.78*u+offset,a=Math.PI+TAU*2.65*u;
+ return V(FX+r*Math.cos(a),5.05-3.05*u+.18,r*Math.sin(a));
+}
+const inner=[],outer=[];
+for(let i=0;i<=200;i++){
+ let u=i/200;
+ inner.push(spiral(u,-.15).add(V(0,-.16)));
+ outer.push(spiral(u,.15).add(V(0,-.16)));
+}
+rail(inner,.026,steel);rail(outer,.026,brass);
+ring(.30,FX,1.98,0,brass);
+const throat=mesh(new THREE.CylinderGeometry(.29,.22,.45,24,1,true),glass);
+throat.position.set(FX,1.98,0);
+const marbleSkin=mat('#e5fffb',.65,.17);
+marbleSkin.emissive.set('#45d9c9');marbleSkin.emissiveIntensity=.32;
+const marble=sphere(.18,-2.04,5.23,0,marbleSkin);
+const marbleLight=new THREE.PointLight(0x79fff1,1.8,2,2);scene.add(marbleLight);
+const marbleBand=ring(1.006,0,0,0,teal,marble,.10);marbleBand.rotation.x=.4;
+const spiralEnd=spiral(1),chuteEnd=V(1.99,1.64,0),chuteExit=V(1.99,2.1055,0);
+const chuteCurve=new THREE.CatmullRomCurve3([spiralEnd,V(.32,2.16,.10),V(.85,2.14,0),V(1.4,2.12,0),chuteExit]);
+for(let z of [-.20,.20]){
+ let p=[];
+ for(let i=0;i<=40;i++){
+  let v=chuteCurve.getPoint(i/40);v.y-=.15;v.z+=z;p.push(v);
+ }
+ rail(p,.045,brass);
+}
+for(let x of [.55,1.35])rod(V(x,.35,0),V(x,2,0),.07,dark);
+
+const pivotX=3.85,pivotY=1.18;
+const seesaw=new THREE.Group();
+seesaw.position.set(pivotX,pivotY,0);scene.add(seesaw);
+const wedge=mesh(new THREE.ConeGeometry(.64,1.05,3),brass);
+wedge.position.set(pivotX,.85,0);wedge.rotation.y=Math.PI/2;
+box(4.3,.17,.7,0,0,0,teal,seesaw);
+for(let x of [-1.92,1.92]){
+ box(.60,.08,.68,x,.11,0,brass,seesaw);
+ for(let z of [-.33,.33])box(.55,.15,.055,x,.2,z,brass,seesaw);
+}
+rod(V(pivotX,pivotY,-.58),V(pivotX,pivotY,.58),.13,steel);
+const launchBall=sphere(.25,5.77,1.34,0,coral);
+ring(1.012,0,0,0,brass,launchBall,.056);
+const IMPACT=MARBLE+2.8+.7,LAUNCH=IMPACT+.16,FLIGHT=.90,HAMMER=LAUNCH+FLIGHT;
+function seesawAngle(t){
+ return -.09+.40*smooth(IMPACT,LAUNCH,t)-.12*smooth(LAUNCH+.32,LAUNCH+.85,t);
+}
+function beamPoint(x,t,r){
+ let a=seesawAngle(t);
+ return V(pivotX+x*Math.cos(a),pivotY+x*Math.sin(a)+r+.12,0);
+}
+const launchPos=beamPoint(1.92,LAUNCH,.25);
+
+const PX=8.55,PY=6.45,PL=2.60,rest=-.60;
+const headCenter=a=>V(PX+PL*Math.sin(a),PY-PL*Math.cos(a),0);
+const hitHead=headCenter(rest);
+const hitBall=hitHead.clone().add(V(-.65*Math.cos(rest),-.65*Math.sin(rest),0));
+const gravity=7.6;
+const launchVel=V((hitBall.x-launchPos.x)/FLIGHT,(hitBall.y-launchPos.y+.5*gravity*FLIGHT*FLIGHT)/FLIGHT,0);
+for(let z of [-.86,.86]){
+ rod(V(PX,.35,z),V(PX,PY+.2,z),.105,navy);
+ box(.55,.12,.55,PX,.4,z,brass);
+}
+rod(V(PX,PY,-1),V(PX,PY,1),.14,brass);
+const pendulum=new THREE.Group();
+pendulum.position.set(PX,PY,0);scene.add(pendulum);
+rod(V(0,0),V(0,-PL),.075,brass,pendulum);
+box(.80,.57,.9,0,-PL,0,steel,pendulum);
+box(.17,.59,.94,.38,-PL,0,brass,pendulum);
+sphere(.18,0,0,0,steel,pendulum);
+function hammerAngle(t){
+ let u=Math.max(0,t-HAMMER);
+ return t<HAMMER?rest:Math.exp(-.55*u)*(rest*Math.cos(2.1*u)+1.12*Math.sin(2.1*u));
+}
+const stackX=10.6,stackBase=3.5,blockW=.53,blockH=.49;
+const collisionAngle=Math.asin((stackX-.80-.40-PX)/PL);
+let smashOffset=0;
+while(hammerAngle(HAMMER+smashOffset)<collisionAngle&&smashOffset<1)smashOffset+=.001;
+const SMASH=HAMMER+smashOffset;
+box(2.45,.16,2.3,stackX,stackBase-.11,0,navy);
+for(let x of [9.65,11.6])for(let z of [-.86,.86])rod(V(x,.34,z),V(x,stackBase-.2,z),.07,brass);
+const blocks=[];
+for(let row=0;row<4;row++)for(let col=0;col<3;col++){
+ let p=V(stackX+(col-1)*.55,stackBase+.245+row*.51,row%2?.035:-.035);
+ let m=box(blockW,blockH,.70,p.x,p.y,p.z,(row+col)%2?coral:cream);
+ let keystone=row===0&&col===2;
+ blocks.push({mesh:m,home:p,keystone,row,col,release:SMASH+(3-row)*.055+col*.025});
+}
+
+const bucketX=13.62,bucketY=1.85,BUCKET_TOP=2.90;
+const bucket=new THREE.Group();
+bucket.position.set(bucketX,bucketY,0);scene.add(bucket);
+const bucketProfile=[new THREE.Vector2(.49,0),new THREE.Vector2(.61,.08),new THREE.Vector2(.72,1),new THREE.Vector2(.75,1.04)];
+const bucketMetal=mat('#4acbbb',.7,.32);bucketMetal.side=THREE.DoubleSide;
+mesh(new THREE.LatheGeometry(bucketProfile,36),bucketMetal,bucket);
+const base=mesh(new THREE.CylinderGeometry(.49,.49,.09,32),brass,bucket);
+base.position.y=.03;
+ring(.73,0,1.03,0,brass,bucket,.06);
+for(let z of [-.66,.66])rod(V(0,.82,z),V(0,1.52,0),.04,brass,bucket);
+sphere(.08,0,1.52,0,brass,bucket);
+const bucketCargo=new THREE.Group();bucket.add(bucketCargo);
+
+const rampStart=V(stackX+.55,stackBase+.245,0),rampEnd=V(bucketX,3.22,0);
+const rampMid=rampStart.clone().add(rampEnd).multiplyScalar(.5);
+const ramp=box(rampStart.distanceTo(rampEnd)+.3,.13,1.15,rampMid.x,rampMid.y-.30,0,navy);
+ramp.rotation.z=Math.atan2(rampEnd.y-rampStart.y,rampEnd.x-rampStart.x);
+for(let z of [-.55,.55])rod(rampStart.clone().add(V(0,-.04,z)),rampEnd.clone().add(V(0,-.04,z)),.035,brass);
+const lastBlock=blocks.find(b=>b.keystone),SLIDE=lastBlock.release+.20,SLIDE_END=13.78;
+const FINALE=14.08,RAISED=14.72,DROP=1.45;
+let firstBucket=Infinity;
+for(let b of blocks){
+ if(b.keystone)continue;
+ let duration=.85+b.row*.11+b.col*.03;
+ b.catch=b.release+duration;
+ firstBucket=Math.min(firstBucket,b.catch);
+ b.velocity=V((bucketX-b.home.x)/duration,(BUCKET_TOP+.05-b.home.y+.5*gravity*duration*duration)/duration,(.12*(b.col-1)-b.home.z)/duration);
+ let cargo=box(.44,.37,.55,(b.col-1)*.28,.20+b.row*.15,b.row%2?.12:-.13,b.mesh.material,bucketCargo);
+ cargo.visible=false;b.cargo=cargo;
+}
+lastBlock.cargo=box(.53,.49,.70,.1,.70,0,brass,bucketCargo);
+lastBlock.cargo.visible=false;
+const ratchet=new THREE.Group();
+ratchet.position.set(bucketX-.82,1.77,0);scene.add(ratchet);
+box(.65,.12,.28,-.20,0,0,brass,ratchet);
+rod(V(-.5,-1.4),V(-.5,0),.06,navy,ratchet);
+
+const wheel=new THREE.Group();
+wheel.position.set(14.97,6.13,0);scene.add(wheel);
+mesh(new THREE.TorusGeometry(1.35,.075,10,80),brass,wheel);
+mesh(new THREE.TorusGeometry(1.26,.03,8,80),steel,wheel);
+sphere(.20,0,0,0,steel,wheel);
+for(let i=0;i<8;i++){
+ let a=TAU*i/8;
+ rod(V(0,0),V(1.28*Math.cos(a),1.28*Math.sin(a)),.034,brass,wheel);
+}
+for(let z of [-.48,.48]){
+ rod(V(14.97,.35,z),V(14.97,6.13,z),.095,navy);
+ rod(V(14.3,.35,z),V(14.97,4.6,z),.065,brass);
+}
+rod(V(16.5,.35),V(16.5,6),.07,brass);
+sphere(.13,16.5,6,0,brass);
+const flagGroup=new THREE.Group();
+flagGroup.position.set(16.48,3.02,0);scene.add(flagGroup);
+const flagGeo=new THREE.PlaneGeometry(1.45,.78,20,8);
+flagGeo.translate(.75,0,0);
+const flag=mesh(flagGeo,new THREE.MeshStandardMaterial({color:'#fbd177',side:THREE.DoubleSide,metalness:.2,roughness:.58}),flagGroup);
+flag.castShadow=false;
+const flagBadge=mesh(new THREE.PlaneGeometry(.61,.39),new THREE.MeshBasicMaterial({map:labelTexture('FIN',256,128),side:THREE.DoubleSide}),flagGroup);
+flagBadge.position.set(.67,0,.025);
+const ropeCount=80,ropePositions=new Float32Array(ropeCount*3),ropeGeometry=new THREE.BufferGeometry();
+ropeGeometry.setAttribute('position',new THREE.BufferAttribute(ropePositions,3));
+const rope=new THREE.Line(ropeGeometry,new THREE.LineBasicMaterial({color:'#e9d5a5'}));
+rope.frustumCulled=false;scene.add(rope);
+
+const lampX=17.65,lampZ=-1.55;
+box(1.1,.17,1.1,lampX,.44,lampZ,navy);
+rod(V(lampX,.52,lampZ),V(lampX,3.8,lampZ),.09,brass);
+const bulbMat=new THREE.MeshStandardMaterial({color:'#c9b382',emissive:'#ffc568',emissiveIntensity:0,roughness:.22,metalness:.1});
+const bulb=sphere(.38,lampX,4.13,lampZ,bulbMat);
+for(let a=0;a<TAU;a+=TAU/6){
+ let x=lampX+Math.cos(a)*.46,z=lampZ+Math.sin(a)*.46;
+ rod(V(x,3.72,z),V(x,4.43,z),.027,brass);
+}
+ring(.47,lampX,3.74,lampZ);ring(.47,lampX,4.43,lampZ);
+const lampLight=new THREE.PointLight(0xffbe5c,0,11,2);
+lampLight.position.set(lampX,4.2,lampZ);scene.add(lampLight);
+const glowCanvas=document.createElement('canvas');
+glowCanvas.width=glowCanvas.height=64;
+const gc=glowCanvas.getContext('2d'),gg=gc.createRadialGradient(32,32,0,32,32,32);
+gg.addColorStop(0,'rgba(255,221,146,1)');
+gg.addColorStop(.2,'rgba(255,188,82,.5)');
+gg.addColorStop(1,'rgba(255,168,44,0)');
+gc.fillStyle=gg;gc.fillRect(0,0,64,64);
+const glowTexture=new THREE.CanvasTexture(glowCanvas);
+const glow=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTexture,transparent:true,opacity:0,blending:THREE.AdditiveBlending,depthWrite:false}));
+glow.position.copy(bulb.position);glow.scale.set(3.6,3.6,1);scene.add(glow);
+rail([V(16.43,4.47,0),V(16.55,4.47,-.35),V(lampX,3.8,lampZ)],.023,coral);
+const switchLever=box(.23,.045,.13,16.42,4.47,0,brass);
+
+const stagePositions=[[-10,6.30,-1.6],[0,5.9,0],[3.8,2.15,-.85],[8.55,7.1,0],[10.6,6,0],[12.65,4.1,1],[16.8,5.5,0]];
+const markers=stagePositions.map((p,i)=>{
+ let c=document.createElement('canvas');c.width=c.height=128;
+ let ctx=c.getContext('2d');
+ ctx.beginPath();ctx.arc(64,64,53,0,TAU);
+ ctx.fillStyle='#163447';ctx.fill();
+ ctx.lineWidth=5;ctx.strokeStyle='#d6f4ed';ctx.stroke();
+ ctx.font='bold 61px Trebuchet MS';ctx.fillStyle='#ffffff';
+ ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(i+1,64,68);
+ let tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;
+ let m=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,color:0x63828f,depthTest:false,transparent:true,opacity:.8}));
+ m.position.set(...p);m.scale.set(.64,.64,1);m.renderOrder=8;scene.add(m);return m;
+});
+
+const N=360;
+const dustData=Array.from({length:N},()=>({born:-100,life:1,p:V(0,-100),v:V(0,0),size:.1,color:new THREE.Color()}));
+let dustCursor=0;
+const dp=new Float32Array(N*3),dc=new Float32Array(N*3),ds=new Float32Array(N),da=new Float32Array(N);
+const dg=new THREE.BufferGeometry();
+dg.setAttribute('position',new THREE.BufferAttribute(dp,3));
+dg.setAttribute('color',new THREE.BufferAttribute(dc,3));
+dg.setAttribute('size',new THREE.BufferAttribute(ds,1));
+dg.setAttribute('alpha',new THREE.BufferAttribute(da,1));
+const dustMaterial=new THREE.ShaderMaterial({
+ transparent:true,depthWrite:false,vertexColors:true,
+ uniforms:{pixelRatio:{value:renderer.getPixelRatio()}},
+ vertexShader:`
+ attribute float size;
+ attribute float alpha;
+ varying vec3 vColor;
+ varying float vAlpha;
+ uniform float pixelRatio;
+ void main(){
+  vColor=color;vAlpha=alpha;
+  vec4 mv=modelViewMatrix*vec4(position,1.);
+  gl_Position=projectionMatrix*mv;
+  gl_PointSize=clamp(size*pixelRatio*430./max(1.,-mv.z),1.,70.);
+ }`,
+ fragmentShader:`
+ varying vec3 vColor;
+ varying float vAlpha;
+ void main(){
+  float d=length(gl_PointCoord-.5)*2.;
+  if(d>1.)discard;
+  gl_FragColor=vec4(vColor,vAlpha*exp(-4.5*d*d)*(1.-smoothstep(.6,1.,d)));
+ }`
+});
+const dust=new THREE.Points(dg,dustMaterial);
+dust.frustumCulled=false;scene.add(dust);
+function puff(p,t,n=15,power=1,color='#cfbaa1'){
+ for(let i=0;i<n;i++){
+  let d=dustData[dustCursor++%N],a=Math.random()*TAU,r=Math.random()*power;
+  d.born=t;d.life=.55+Math.random()*.65;d.p.copy(p);
+  d.v.set(Math.cos(a)*r,.45+Math.random()*power,Math.sin(a)*r);
+  d.size=.12+Math.random()*.16;d.color.set(color);
+ }
+}
+const events=[],event=(t,fn)=>events.push({t,fn});
+for(let d of doms)event(d.start+delay(1.32,d.speed)*scaleTime,t=>{
+ let a=d.group.rotation.y;
+ puff(V(d.x+Math.cos(a)*.80,DECK+.05,d.z-Math.sin(a)*.8),t,5,.35);
+});
+event(MARBLE,t=>puff(marble.position.clone(),t,15,.65));
+event(IMPACT,t=>puff(chuteEnd,t,22,1));
+event(LAUNCH,t=>puff(launchPos,t,12,.65));
+event(HAMMER,t=>puff(hitBall,t,24,1.3));
+event(SMASH,t=>puff(V(stackX-.65,4.05),t,46,2.1));
+for(let b of blocks)if(!b.keystone)event(b.catch,t=>puff(V(bucketX,BUCKET_TOP),t,10,.7));
+event(FINALE,t=>puff(V(bucketX,BUCKET_TOP),t,25,1));
+event(RAISED,t=>puff(V(16.6,4.4),t,50,2.4,'#ffdc79'));
+events.sort((a,b)=>a.t-b.t);
+let eventIndex=0;
+const stageTimes=[.2,MARBLE,IMPACT,HAMMER,SMASH,firstBucket,FINALE];
+const copy=[
+ ['Domino circuit','One push. Two ways down.','Both colored arms must release the bridge before the final push.'],
+ ['Spiral tower','Taking the scenic route.','The last domino sends the steel marble into a 2.65-turn funnel.'],
+ ['Seesaw launch','A little leverage goes a long way.','The marble lands on the left. The gold-ringed ball takes off.'],
+ ['Pendulum hammer','Momentum, meet mallet.','The airborne ball strikes the suspended hammer and starts its swing.'],
+ ['Block collapse','Structural integrity: cancelled.','The hammer removes the bottom row. Gravity handles the rest.'],
+ ['Pulley counterweight','Waiting for the last straw.','Falling blocks tip the bucket. The heavy slider releases its ratchet.'],
+ ['Flag + lamp','An unnecessarily glorious finish.','The loaded bucket hoists the flag, which closes the lamp contact.']
+];
+const steps=[...document.querySelectorAll('.step')];
+const caption=document.getElementById('caption'),detail=document.getElementById('detail'),sequence=document.getElementById('sequence'),finish=document.getElementById('finish');
+const timeText=document.getElementById('time'),hand=document.getElementById('hand'),reset=document.getElementById('reset'),loopText=document.getElementById('loop');
+let shownStage=-2;
+const cameraKeys=[
+ [0,[4,22,33],[1.3,2.7,0]],
+ [1.05,[-5,11.5,12.5],[-10.8,4.8,0]],
+ [2.9,[-1.5,11,12],[-7.6,4.8,0]],
+ [4.6,[5,10.7,12.7],[-.5,3.5,0]],
+ [6.5,[5.4,8.8,10.5],[0,3.35,0]],
+ [7.95,[7.5,7.4,10.5],[3,1.9,0]],
+ [8.85,[10.6,9.5,12],[6.65,3.6,0]],
+ [9.8,[14,10.4,12.8],[10,4.2,0]],
+ [11.2,[18.5,10,12.7],[13,3.7,0]],
+ [13.8,[19,9.3,11.5],[14.2,3.6,0]],
+ [14.55,[20,10.5,13.5],[15,4,0]],
+ [15,[4,22,33],[1.3,2.7,0]]
+];
+let sim=0,loopNumber=1,previous=performance.now();
+const look=V(0,0),camPos=V(0,0);
+
+function update(t){
+ for(let d of doms){
+  let u=Math.max(0,(t-d.start)/scaleTime*d.speed);
+  d.angle=Math.min(1.46,.8*u+12*u*u);
+  d.pivot.rotation.z=-d.angle;
+  d.material.emissive.setHex(0x295d55);
+  d.material.emissiveIntensity=d.angle>0&&d.angle<1.35?.28:0;
+ }
+ finger.position.x=-14.55+.38*smooth(.02,.20,t)-.38*smooth(.22,.50,t);
+ latches.forEach((g,i)=>g.rotation.y=(i?-1:1)*1.25*smooth(armHits[i],armHits[i]+.13,t));
+
+ if(t<MARBLE)marble.position.set(-2.04,5.23,0);
+ else if(t<MARBLE+2.8)marble.position.copy(spiral((t-MARBLE)/2.8));
+ else if(t<IMPACT){
+  let u=t-MARBLE-2.8;
+  if(u<.35)marble.position.copy(chuteCurve.getPoint(u/.35));
+  else{
+   marble.position.copy(chuteExit);
+   marble.position.y-=.5*gravity*(u-.35)*(u-.35);
+  }
+ }else{
+  let u=t-IMPACT;
+  if(u<.44)marble.position.copy(beamPoint(-1.88,t,.18));
+  else{
+   let s=u-.44;
+   marble.position.set(1.98-.9*s,1.31+s-4*s*s,.35*s);
+   if(marble.position.y<.53)marble.position.y=.53+.12*Math.exp(-s*3)*Math.abs(Math.sin(s*12));
+  }
+ }
+ marble.rotation.z=-t*6;marble.rotation.y=t*2;
+ marbleLight.position.copy(marble.position);
+ seesaw.rotation.z=seesawAngle(t);
+
+ if(t<LAUNCH)launchBall.position.copy(beamPoint(1.92,t,.25));
+ else if(t<HAMMER){
+  let u=t-LAUNCH;
+  launchBall.position.copy(launchPos).addScaledVector(launchVel,u);
+  launchBall.position.y-=.5*gravity*u*u;
+ }else{
+  let u=t-HAMMER;
+  launchBall.position.copy(hitBall).add(V(-1.55*u,1.2*u-.5*gravity*u*u,u));
+  if(launchBall.position.y<.6)launchBall.position.y=.6+.25*Math.exp(-u*2)*Math.abs(Math.sin(u*8));
+ }
+ launchBall.rotation.z=-t*4;
+ pendulum.rotation.z=hammerAngle(t);
+
+ const loaded=smooth(firstBucket,11.35,t),lower=DROP*smooth(FINALE,RAISED,t);
+ bucket.position.y=bucketY-lower;
+ bucket.rotation.z=.13*Math.sin(Math.max(0,t-firstBucket)*6)*Math.exp(-Math.max(0,t-firstBucket))+.16*loaded*(1-smooth(FINALE,RAISED,t));
+ ratchet.rotation.z=-.9*smooth(FINALE-.03,FINALE+.16,t);
+
+ for(let b of blocks){
+  let u=t-b.release;
+  if(u<0){
+   b.mesh.visible=true;b.mesh.position.copy(b.home);
+   b.mesh.rotation.set(0,0,0);b.cargo.visible=false;continue;
+  }
+  if(b.keystone){
+   if(t<SLIDE){
+    b.mesh.position.copy(b.home);
+    b.mesh.rotation.z=-.18*smooth(b.release,SLIDE,t);
+   }else if(t<SLIDE_END){
+    let q=clamp((t-SLIDE)/(SLIDE_END-SLIDE),0,1);
+    b.mesh.position.copy(rampStart).lerp(rampEnd,.1*q+.9*q*q);
+    b.mesh.rotation.z=-.12+.035*Math.sin(t*12);
+    if(Math.floor(t*12)!==Math.floor((t-.016)*12))puff(b.mesh.position.clone().add(V(0,-.25)),t,1,.12);
+   }else{
+    let q=clamp((t-SLIDE_END)/(FINALE-SLIDE_END),0,1);
+    b.mesh.position.copy(rampEnd).add(V(.08*q,-.78*q*q,0));
+    b.mesh.rotation.z=-q*.55;
+   }
+   b.mesh.visible=t<FINALE;b.cargo.visible=t>=FINALE;
+  }else{
+   b.mesh.visible=t<b.catch;b.cargo.visible=t>=b.catch;
+   if(b.mesh.visible){
+    b.mesh.position.copy(b.home).addScaledVector(b.velocity,u);
+    b.mesh.position.y-=.5*gravity*u*u;
+    b.mesh.rotation.set(u*(b.col-1)*2,u*1.4,-u*2.5);
+   }
+  }
+ }
+ wheel.rotation.z=-lower/1.35;
+ flagGroup.position.y=3.02+lower;
+ const vertices=flagGeo.attributes.position;
+ for(let i=0;i<vertices.count;i++){
+  let x=vertices.getX(i),y=vertices.getY(i);
+  vertices.setZ(i,Math.sin(x*5-t*7+y*2)*.10*(x/1.5));
+ }
+ vertices.needsUpdate=true;flagGeo.computeVertexNormals();flagBadge.position.z=.12;
+
+ let ropePoints=[];
+ const attachment=V(0,1.52).applyEuler(bucket.rotation).add(bucket.position);
+ ropePoints.push(attachment,V(bucketX,6.13));
+ for(let i=0;i<=45;i++){
+  let a=Math.PI-Math.PI*i/45;
+  ropePoints.push(V(14.97+1.35*Math.cos(a),6.13+1.35*Math.sin(a)));
+ }
+ ropePoints.push(V(16.32,flagGroup.position.y+.45),V(16.48,flagGroup.position.y+.45));
+ for(let i=0;i<ropeCount;i++){
+  let q=i/(ropeCount-1)*(ropePoints.length-1),j=Math.min(ropePoints.length-2,Math.floor(q));
+  let p=ropePoints[j].clone().lerp(ropePoints[j+1],q-j);
+  ropePositions.set([p.x,p.y,p.z],i*3);
+ }
+ ropeGeometry.attributes.position.needsUpdate=true;
+
+ const on=t>=RAISED;
+ bulbMat.emissiveIntensity=on?3.5:0;
+ bulbMat.color.set(on?'#fff0a2':'#c9b382');
+ lampLight.intensity=on?22:0;
+ glow.material.opacity=on?.8:0;
+ switchLever.rotation.z=on?-.6:0;
+ finish.classList.toggle('on',on);
+ while(eventIndex<events.length&&events[eventIndex].t<=t){
+  let e=events[eventIndex++];e.fn(e.t);
+ }
+ for(let i=0;i<N;i++){
+  let d=dustData[i],age=t-d.born,k=clamp(age/d.life,0,1);
+  if(age<0||k>=1){da[i]=0;ds[i]=0;continue}
+  dp[i*3]=d.p.x+d.v.x*age;
+  dp[i*3+1]=d.p.y+d.v.y*age-.8*age*age;
+  dp[i*3+2]=d.p.z+d.v.z*age;
+  dc[i*3]=d.color.r;dc[i*3+1]=d.color.g;dc[i*3+2]=d.color.b;
+  ds[i]=d.size*(1+age*2.8);da[i]=(1-k)*.55;
+ }
+ for(let a of Object.values(dg.attributes))a.needsUpdate=true;
+
+ let stage=0;
+ for(let i=0;i<7;i++)if(t>=stageTimes[i])stage=i;
+ if(stage!==shownStage){
+  shownStage=stage;
+  steps.forEach((s,i)=>{
+   s.className='step'+(i<stage?' done':'')+(i===stage?' active':'');
+   markers[i].material.color.set(i<=stage?'#b6fff2':'#63828f');
+   markers[i].material.opacity=i<=stage?1:.65;
+  });
+  sequence.textContent=`0${stage+1} / ${copy[stage][0]}`;
+  caption.textContent=copy[stage][1];detail.textContent=copy[stage][2];
+ }
+ timeText.textContent=t.toFixed(1).padStart(4,'0')+' / 15';
+ hand.style.strokeDashoffset=126*(1-t/LOOP);
+ reset.style.opacity=t<.13?1-t/.13:t>14.94?(t-14.94)/.06:0;
+
+ let k=0;
+ while(k<cameraKeys.length-2&&t>cameraKeys[k+1][0])k++;
+ let a=cameraKeys[k],b=cameraKeys[k+1],u=smooth(a[0],b[0],t);
+ camPos.set(...a[1]).lerp(V(...b[1]),u);
+ look.set(...a[2]).lerp(V(...b[2]),u);
+ if(camera.aspect<1.35)camPos.sub(look).multiplyScalar(Math.min(1.9,1.35/camera.aspect)).add(look);
+ const shake=t>SMASH&&t<SMASH+.22?Math.sin((t-SMASH)*95)*.075*(1-(t-SMASH)/.22):0;
+ camera.position.copy(camPos);camera.position.y+=shake;camera.lookAt(look);
+}
+
+function frame(now){
+ requestAnimationFrame(frame);
+ const dt=Math.min((now-previous)/1000,.05);
+ previous=now;sim+=dt;
+ if(sim>=LOOP){
+  sim%=LOOP;loopNumber++;eventIndex=0;shownStage=-2;
+  for(let d of dustData)d.born=-100;
+  loopText.textContent='Loop '+String(loopNumber).padStart(3,'0');
+ }
+ update(sim);renderer.render(scene,camera);
+}
+addEventListener('resize',()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
