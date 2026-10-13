@@ -183,15 +183,15 @@ def make_gifs(date, models, tasks):
     return 0
 
 def make_clips(date, models, tasks):
-    """Every cell's video -> clip.mp4 (480 px, 15 fps, muted, ~0.3-1 MB) + poster.jpg, committed so the public page can play all of them."""
+    """Every cell's video -> clip.mp4 (640 px = native render size, 24 fps, muted, ~0.3-1 MB) + poster.jpg, committed so the public page can play all of them."""
     base = ROOT / "runs" / date
     for m in models:
         for t in tasks:
             c = base / m / t; v = c / "video.webm"
             if not v.exists(): continue
-            subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(v), "-vf", "fps=15,scale=480:-2", "-c:v", "libx264", "-preset", "slow", "-crf", "31",
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(v), "-vf", "fps=24,scale=640:-2", "-c:v", "libx264", "-preset", "slow", "-crf", "27",
                             "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", str(c / "clip.mp4")], check=True, stdin=subprocess.DEVNULL)
-            subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", "4", "-i", str(v), "-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "5", str(c / "poster.jpg")], check=True, stdin=subprocess.DEVNULL)
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", "4", "-i", str(v), "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "4", str(c / "poster.jpg")], check=True, stdin=subprocess.DEVNULL)
             print(f"{m}/{t}: clip {(c / 'clip.mp4').stat().st_size // 1024} KB")
     return 0
 

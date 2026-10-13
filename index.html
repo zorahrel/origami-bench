@@ -1,11 +1,11 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>origami-bench: how much can a model fold into 8,000 tokens?</title>
-<style>body{font:16px/1.5 system-ui,sans-serif;max-width:1100px;margin:0 auto;padding:24px;color:#111}h1{margin:.2em 0}table.lb{border-collapse:collapse;width:100%;margin:16px 0}
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:1400px;margin:0 auto;padding:24px;color:#111}h1{margin:.2em 0}table.lb{border-collapse:collapse;width:100%;margin:16px 0}
 td,th{padding:8px;border-bottom:1px solid #eee;text-align:left}.m{color:#666;font-size:14px}a{color:#5b2ee6}
-.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.grid h4{margin:0;font-size:13px;color:#666;font-weight:600}
-.cell{background:#f6f6f8;border-radius:8px;overflow:hidden;font-size:13px}.cell video,.cell .na{width:100%;aspect-ratio:8/5;display:block;background:#111;object-fit:cover}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.grid h4{margin:0;font-size:13px;color:#666;font-weight:600}
+.cell{background:#f6f6f8;border-radius:8px;overflow:hidden;font-size:15px}.cell video,.cell .na{width:100%;aspect-ratio:8/5;display:block;background:#111;object-fit:cover}
 .na{color:#fff;display:flex!important;align-items:center;justify-content:center}.cell div{padding:5px 8px;display:flex;justify-content:space-between;gap:6px}
-.s{font-weight:700}h3{margin:28px 0 8px}@media(max-width:800px){.grid{grid-template-columns:repeat(2,1fr)}}</style></head><body>
+.s{font-weight:700}h3{margin:28px 0 8px}@media(max-width:800px){.grid{grid-template-columns:1fr}}</style></head><body>
 <h1>🦢 origami-bench</h1><p><b>How much can a model fold into 8,000 tokens?</b> Every model gets the same short prompt and must return one self-contained HTML file under an 8,000-token output budget. It is then <i>actually run</i>: headless WebKit, 10-second video, health checks, video-judge score.</p>
 <p class="m">Run of 2026-10-13: <b>hard tasks</b> (chained sequences, not demos). <a href="previous-run.html">Previous run (easy tasks, 2026-10-12)</a> · <a href="https://github.com/zorahrel/origami-bench">code and method</a></p>
 <h2>Leaderboard</h2><table class="lb"><tr><th>#</th><th>model</th><th>mean</th><th>Parkour + combat fighter</th><th>Rube-Goldberg chain</th><th>Clockwork automaton</th><th>Raymarched SDF scene</th></tr>
